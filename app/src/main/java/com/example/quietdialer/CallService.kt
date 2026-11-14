@@ -21,8 +21,8 @@ class CallService : InCallService() {
 
     companion object {
         @Volatile var instance: CallService? = null
-        const val CH_INCOMING = "incoming_calls"
-        const val CH_ONGOING = "ongoing_calls"
+        const val CH_INCOMING = "incoming_calls_v2"
+        const val CH_ONGOING = "ongoing_calls_v2"
         const val NOTIF_ID = 1
         const val EXTRA_ANSWER = "answer"
     }
@@ -38,12 +38,20 @@ class CallService : InCallService() {
         super.onCreate()
         instance = this
         val nm = getSystemService(NotificationManager::class.java)
+        // Old channels keep their cached settings, so they are replaced by "_v2" ones that are
+        // explicitly visible on the lock screen.
+        nm.deleteNotificationChannel("incoming_calls")
+        nm.deleteNotificationChannel("ongoing_calls")
         nm.createNotificationChannel(
-            NotificationChannel(CH_INCOMING, "Incoming calls", NotificationManager.IMPORTANCE_HIGH)
-                .apply { setSound(null, null) } // we play the ringtone ourselves
+            NotificationChannel(CH_INCOMING, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
+                setSound(null, null) // we play the ringtone ourselves
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_LOW).apply {
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
         )
     }
 
@@ -101,7 +109,9 @@ class CallService : InCallService() {
     private fun buildNotification(call: Call, ringing: Boolean): android.app.Notification {
         val person = Person.Builder().setName(CallManager.numberOf(call)).setImportant(true).build()
         val open = PendingIntent.getActivity(
-            this, 10, Intent(this, InCallActivity::class.java),
+            this, 10,
+            Intent(this, InCallActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val hangup = PendingIntent.getBroadcast(
@@ -113,6 +123,7 @@ class CallService : InCallService() {
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // show full content on the lock screen
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
 
