@@ -26,6 +26,7 @@ class CallService : InCallService() {
     }
 
     private var ringtone: Ringtone? = null
+        private var activeSince = 0L
 
     private val cb = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) = onCallsChanged()
@@ -78,6 +79,7 @@ class CallService : InCallService() {
         CallManager.publish()
         val primary = CallManager.primary()
         if (primary == null) {
+                        activeSince = 0L
             stopRinging()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             return
@@ -125,8 +127,15 @@ class CallService : InCallService() {
                 .setFullScreenIntent(open, true)
         } else {
             b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
-            val t = call.details.connectTimeMillis
-            if (t > 0) b.setWhen(t).setUsesChronometer(true).setShowWhen(true)
+                .setContentTitle(CallManager.numberOf(call))
+                .setContentText("Ongoing call")
+            if (call.state == Call.STATE_ACTIVE) {
+                if (activeSince == 0L) {
+                    activeSince = call.details.connectTimeMillis.takeIf { it > 0 }
+                        ?: System.currentTimeMillis()
+                }
+                b.setWhen(activeSince).setUsesChronometer(true).setShowWhen(true)
+            }
         }
         val n = b.build()
         n.flags = n.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
