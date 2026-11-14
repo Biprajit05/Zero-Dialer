@@ -1,6 +1,19 @@
 # Quiet Dialer
-Basic Android dialer: keypad, call log, in-call screen.
-- Proximity sensor is held ONLY while the in-call screen is visible (InCallActivity.onResume/onPause).
-- Active call lives in a non-dismissable CallStyle foreground notification until you hang up.
+Basic Android dialer with a clean Dial / Contacts / Favorites layout.
+
+**Update 1**
+- New Dial screen: large title, recents on top, always-visible keypad below (hide/show it with the dots button)
+- Recents show name, HD / Wi-Fi tags, number, time (today / Yesterday / date), outgoing-call icon, and a details button
+- Select mode (checkbox icon, or long-press a call) to delete several calls; search; menu with "missed only" and "clear call log"
+- Smart dial: type digits, or letters on the keypad, to see matching contacts
+- Contacts tab (A-Z) and Favorites tab (starred contacts)
+- Keypad tones follow the system "dial pad tones" setting; long-press 0 for +, long-press backspace to clear
+- Call button with an empty number redials the last outgoing call
+
+- In-call screen redesigned: dark glass look, swipe-up Answer/Decline, SMS reply, Mute, Hold, Add call, Speaker, in-call dial pad, swap between two calls
+- Banner warns when the app is not the default phone app
+
+Proximity sensor is held ONLY while the in-call screen is visible (InCallActivity.onResume/onPause).
+Active call lives in a non-dismissable CallStyle foreground notification until you hang up.
 
 Push to GitHub -> Actions -> "Build APK" -> download the artifact, install, then set it as default phone app.
