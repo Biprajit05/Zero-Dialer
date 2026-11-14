@@ -20,7 +20,7 @@ class CallService : InCallService() {
     companion object {
         @Volatile var instance: CallService? = null
         const val CH_INCOMING = "incoming_calls"
-        const val CH_ONGOING = "ongoing_calls"
+                const val CH_ONGOING = "ongoing_calls_v2"
         const val NOTIF_ID = 1
         const val EXTRA_ANSWER = "answer"
     }
@@ -42,7 +42,8 @@ class CallService : InCallService() {
                 .apply { setSound(null, null) } // we play the ringtone ourselves
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { setSound(null, null); enableVibration(false) }
         )
     }
 
@@ -126,7 +127,7 @@ class CallService : InCallService() {
             b.setStyle(NotificationCompat.CallStyle.forIncomingCall(person, hangup, answer))
                 .setFullScreenIntent(open, true)
         } else {
-            b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
+            b.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangup)
                 .setContentTitle(CallManager.numberOf(call))
                 .setContentText("Ongoing call")
             if (call.state == Call.STATE_ACTIVE) {
