@@ -1,5 +1,6 @@
 package com.example.quietdialer
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -70,6 +71,9 @@ class CallService : InCallService() {
         CallManager.setAudio(audioState)
     }
 
+    /** Called when the user swipes the notification away: show it again. */
+    fun refreshNotification() = onCallsChanged()
+
     private fun onCallsChanged() {
         CallManager.publish()
         val primary = CallManager.primary()
@@ -86,7 +90,7 @@ class CallService : InCallService() {
         )
     }
 
-    private fun buildNotification(call: Call, ringing: Boolean): android.app.Notification {
+    private fun buildNotification(call: Call, ringing: Boolean): Notification {
         val person = Person.Builder().setName(CallManager.numberOf(call)).setImportant(true).build()
         val open = PendingIntent.getActivity(
             this, 10, Intent(this, InCallActivity::class.java),
@@ -97,11 +101,18 @@ class CallService : InCallService() {
             Intent(this, CallActionReceiver::class.java).setAction(CallActionReceiver.HANGUP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val repost = PendingIntent.getBroadcast(
+            this, 13,
+            Intent(this, CallActionReceiver::class.java).setAction(CallActionReceiver.REPOST),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
         val b = NotificationCompat.Builder(this, if (ringing) CH_INCOMING else CH_ONGOING)
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setDeleteIntent(repost)     // if it is dismissed anyway, show it again
             .setContentIntent(open)
 
         if (ringing) {
@@ -117,7 +128,9 @@ class CallService : InCallService() {
             val t = call.details.connectTimeMillis
             if (t > 0) b.setWhen(t).setUsesChronometer(true).setShowWhen(true)
         }
-        return b.build()
+        val n = b.build()
+        n.flags = n.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
+        return n
     }
 
     private fun startRinging() {
