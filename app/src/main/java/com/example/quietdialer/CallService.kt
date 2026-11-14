@@ -69,6 +69,7 @@ class CallService : InCallService() {
 
     override fun onCallAudioStateChanged(audioState: CallAudioState) {
         CallManager.setAudio(audioState)
+        onCallsChanged() // keep Mute / Speaker labels in the notification in sync
     }
 
     /** Re-posts the call notification. Kept public so receivers/other code can call it. */
@@ -122,11 +123,34 @@ class CallService : InCallService() {
                 .setFullScreenIntent(open, true)
         } else {
             b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
+            // Extra buttons shown next to Hang up (CallStyle allows up to 3 actions in total).
+            val muted = CallManager.isMuted()
+            val speaker = CallManager.isSpeaker()
+            b.addAction(
+                if (muted) android.R.drawable.ic_lock_silent_mode else android.R.drawable.ic_lock_silent_mode_off,
+                if (muted) "Unmute" else "Mute",
+                actionIntent(13, CallActionReceiver.MUTE)
+            )
+            b.addAction(
+                android.R.drawable.ic_btn_speak_now,
+                if (speaker) "Speaker off" else "Speaker",
+                actionIntent(14, CallActionReceiver.SPEAKER)
+            )
             val t = call.details.connectTimeMillis
             if (t > 0) b.setWhen(t).setUsesChronometer(true).setShowWhen(true)
         }
-        return b.build()
+        // If the user manages to dismiss it anyway, put it straight back.
+        b.setDeleteIntent(actionIntent(15, CallActionReceiver.REPOST))
+        val n = b.build()
+        n.flags = n.flags or android.app.Notification.FLAG_NO_CLEAR or android.app.Notification.FLAG_ONGOING_EVENT
+        return n
     }
+
+    private fun actionIntent(requestCode: Int, action: String) = PendingIntent.getBroadcast(
+        this, requestCode,
+        Intent(this, CallActionReceiver::class.java).setAction(action),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+    )
 
     private fun startRinging() {
         if (ringtone?.isPlaying == true) return

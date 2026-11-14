@@ -42,6 +42,20 @@ object CallManager {
     fun remove(c: Call) { live.remove(c); names.remove(c); publish() }
     fun setAudio(a: CallAudioState) { _audio.value = a }
 
+    fun isMuted(): Boolean = _audio.value?.isMuted == true
+    fun isSpeaker(): Boolean = _audio.value?.route == CallAudioState.ROUTE_SPEAKER
+
+    fun toggleMute() { CallService.instance?.setMuted(!isMuted()) }
+
+    /** Speaker on <-> back to Bluetooth (if connected) or earpiece/wired. */
+    fun toggleSpeaker() {
+        val svc = CallService.instance ?: return
+        val mask = _audio.value?.supportedRouteMask ?: 0
+        val back = if ((mask and CallAudioState.ROUTE_BLUETOOTH) != 0)
+            CallAudioState.ROUTE_BLUETOOTH else CallAudioState.ROUTE_WIRED_OR_EARPIECE
+        svc.setAudioRoute(if (isSpeaker()) back else CallAudioState.ROUTE_SPEAKER)
+    }
+
     fun primary(): Call? =
         live.firstOrNull { it.state == Call.STATE_RINGING }
             ?: live.firstOrNull {

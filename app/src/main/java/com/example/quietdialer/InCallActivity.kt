@@ -65,12 +65,8 @@ class InCallActivity : ComponentActivity() {
                     onAnswer = { primary.call.answer(VideoProfile.STATE_AUDIO_ONLY) },
                     onDecline = { primary.call.reject(false, null) },
                     onSmsReply = { primary.call.reject(true, it) },
-                    onMute = { CallService.instance?.setMuted(audio?.isMuted != true) },
-                    onSpeaker = {
-                        val back = if (((audio?.supportedRouteMask ?: 0) and CallAudioState.ROUTE_BLUETOOTH) != 0)
-                            CallAudioState.ROUTE_BLUETOOTH else CallAudioState.ROUTE_WIRED_OR_EARPIECE
-                        CallService.instance?.setAudioRoute(if (speaker) back else CallAudioState.ROUTE_SPEAKER)
-                    },
+                    onMute = { CallManager.toggleMute() },
+                    onSpeaker = { CallManager.toggleSpeaker() },
                     onHold = {
                         if (primary.state == Call.STATE_HOLDING) primary.call.unhold() else primary.call.hold()
                     },
