@@ -219,31 +219,36 @@ fun DialTab(
         if (!selecting && !searching) {
             HorizontalDivider(color = Pal.Divider)
             AnimatedVisibility(visible = padVisible) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
                     KEYS.forEach { row ->
                         Row(Modifier.fillMaxWidth()) {
                             row.forEach { (d, letters) ->
                                 Box(
-                                    Modifier.weight(1f).height(66.dp).clip(RoundedCornerShape(20.dp))
-                                        .combinedClickable(
-                                            onClick = { key(d) },
-                                            onLongClick = if (d == "0") ({ key("+") }) else null
-                                        ),
+                                    Modifier.weight(1f).height(80.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center
+                                    Box(
+                                        Modifier.size(72.dp).clip(CircleShape).background(Pal.Key)
+                                            .combinedClickable(
+                                                onClick = { key(d) },
+                                                onLongClick = if (d == "0") ({ key("+") }) else null
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
-                                        Text(
-                                            d, fontSize = if (d == "*" || d == "#") 34.sp else 32.sp,
-                                            color = Pal.Ink
-                                        )
-                                        if (d == "1") VoicemailGlyph()
-                                        else if (letters.isNotEmpty()) Text(
-                                            letters, fontSize = 12.sp, color = Pal.Letters,
-                                            fontWeight = FontWeight.Medium
-                                        )
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            Text(
+                                                d, fontSize = if (d == "*" || d == "#") 32.sp else 30.sp,
+                                                color = Pal.Ink, lineHeight = 32.sp
+                                            )
+                                            if (d == "1") VoicemailGlyph()
+                                            else if (letters.isNotEmpty()) Text(
+                                                letters, fontSize = 10.sp, color = Pal.Ink,
+                                                fontWeight = FontWeight.Bold, lineHeight = 11.sp
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -260,7 +265,7 @@ fun DialTab(
                 }
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     Box(
-                        Modifier.size(72.dp).clip(RoundedCornerShape(26.dp)).background(Pal.Green)
+                        Modifier.size(72.dp).clip(CircleShape).background(Pal.Green)
                             .clickable { call() },
                         contentAlignment = Alignment.Center
                     ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(32.dp)) }

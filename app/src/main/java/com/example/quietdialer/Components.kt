@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
@@ -39,16 +40,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object Pal {
-    val Green = Color(0xFF00C257)
+    val Green = Color(0xFF34C759)
     val Ink = Color(0xFF1B1B1B)
     val Gray = Color(0xFF8A8A8A)
     val Divider = Color(0xFFE4E4E4)
-    val Letters = Color(0xFF7FA98D)
-    val Missed = Color(0xFFD93025)
+    val Letters = Color(0xFF8A8A8E)
+    val Missed = Color(0xFFFF3B30)
     val ChipBg = Color(0xFFBDBDBD)
-    val Soft = Color(0xFFF1F1F1)
-    val BackspaceBg = Color(0xFFFFF1CF)
-    val BackspaceX = Color(0xFFD7A33A)
+    val Soft = Color(0xFFF2F2F7)
+    val Key = Color(0xFFE9E9EB)
+    val BackspaceBg = Color(0x00000000)
+    val BackspaceX = Color(0xFF8A8A8E)
 }
 
 /** Large page title with action icons on the right (like "Dial" in the reference). */
@@ -224,22 +226,27 @@ fun ActionDialog(name: String, number: String, history: List<LogEntry>, onDismis
 
 @Composable
 fun BottomBar(tab: Int, onTab: (Int) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(Color.White).navigationBarsPadding()) {
-        HorizontalDivider(color = Pal.Divider)
-        Row(Modifier.fillMaxWidth().height(64.dp)) {
+    Box(Modifier.fillMaxWidth().background(Color.White).navigationBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(32.dp)).background(Pal.Soft).padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             listOf(
-                Icons.Default.Call to "Dial",
+                Icons.Default.Dialpad to "Keypad",
                 Icons.Default.Person to "Contacts",
                 Icons.Default.Star to "Favorites"
             ).forEachIndexed { i, (icon, label) ->
-                val c = if (tab == i) Pal.Green else Pal.Gray
+                val selected = tab == i
+                val c = if (selected) Pal.Green else Pal.Ink
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().clickable { onTab(i) },
+                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(26.dp))
+                        .background(if (selected) Color.White else Color.Transparent)
+                        .clickable { onTab(i) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(icon, label, tint = c, modifier = Modifier.size(26.dp))
-                    Text(label, fontSize = 14.sp, color = c, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal)
+                    Icon(icon, label, tint = c, modifier = Modifier.size(24.dp))
+                    Text(label, fontSize = 12.sp, color = c, fontWeight = FontWeight.SemiBold)
                 }
             }
         }

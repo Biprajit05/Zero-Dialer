@@ -122,7 +122,14 @@ class CallService : InCallService() {
                 Intent(this, InCallActivity::class.java).putExtra(EXTRA_ANSWER, true),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-            b.setStyle(NotificationCompat.CallStyle.forIncomingCall(person, hangup, answer))
+            val v = RemoteViews(packageName, R.layout.notification_incoming)
+            v.setTextViewText(R.id.inc_name, CallManager.numberOf(call))
+            v.setOnClickPendingIntent(R.id.inc_decline, hangup)
+            v.setOnClickPendingIntent(R.id.inc_accept, answer)
+            b.setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                .setCustomContentView(v)
+                .setCustomBigContentView(v)
+                .setCustomHeadsUpContentView(v)
                 .setFullScreenIntent(open, true)
         } else {
             // Custom pill: name + timer on the left, Mute / Speaker / Hang up circles on the right.
