@@ -53,7 +53,11 @@ class MainActivity : ComponentActivity() {
         val initial = intent?.data?.schemeSpecificPart ?: ""
         setContent { MaterialTheme { App(initial, version.intValue) } }
 
-        val wanted = mutableListOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_CALL_LOG)
+            val wanted = mutableListOf(
+            Manifest.permission.CALL_PHONE,
+            Manifest.permission.READ_CALL_LOG,
+            Manifest.permission.READ_CONTACTS
+        )
         if (Build.VERSION.SDK_INT >= 33) wanted += Manifest.permission.POST_NOTIFICATIONS
         val missing = wanted.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
