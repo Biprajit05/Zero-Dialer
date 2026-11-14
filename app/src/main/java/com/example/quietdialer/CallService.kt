@@ -1,6 +1,5 @@
 package com.example.quietdialer
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -20,13 +19,12 @@ class CallService : InCallService() {
     companion object {
         @Volatile var instance: CallService? = null
         const val CH_INCOMING = "incoming_calls"
-                const val CH_ONGOING = "ongoing_calls_v2"
+        const val CH_ONGOING = "ongoing_calls"
         const val NOTIF_ID = 1
         const val EXTRA_ANSWER = "answer"
     }
 
     private var ringtone: Ringtone? = null
-        private var activeSince = 0L
 
     private val cb = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) = onCallsChanged()
@@ -42,8 +40,7 @@ class CallService : InCallService() {
                 .apply { setSound(null, null) } // we play the ringtone ourselves
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { setSound(null, null); enableVibration(false) }
+            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_LOW)
         )
     }
 
@@ -55,12 +52,13 @@ class CallService : InCallService() {
 
     override fun onCallAdded(call: Call) {
         call.registerCallback(cb)
-        CallManager.add(call)
+        CallManager.add(call, this)
         onCallsChanged()
-        // Incoming calls open the UI via the full-screen notification; outgoing open it directly.
-        if (call.state != Call.STATE_RINGING) {
+        // Always try to open our call screen right away. For incoming calls the full-screen
+        // notification is the backup if the system blocks this (e.g. phone is locked/idle).
+        try {
             startActivity(Intent(this, InCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }
+        } catch (e: Exception) { }
     }
 
     override fun onCallRemoved(call: Call) {
@@ -73,27 +71,27 @@ class CallService : InCallService() {
         CallManager.setAudio(audioState)
     }
 
-    /** Called when the user swipes the notification away: show it again. */
-    fun refreshNotification() = onCallsChanged()
-
     private fun onCallsChanged() {
         CallManager.publish()
         val primary = CallManager.primary()
         if (primary == null) {
-                        activeSince = 0L
             stopRinging()
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             return
         }
         val ringing = primary.state == Call.STATE_RINGING
         if (ringing) startRinging() else stopRinging()
-        ServiceCompat.startForeground(
-            this, NOTIF_ID, buildNotification(primary, ringing),
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
-        )
+        // A notification problem must never take the whole call service down: if this service
+        // crashes, Android hands the call to the phone's built-in call screen instead of ours.
+        try {
+            ServiceCompat.startForeground(
+                this, NOTIF_ID, buildNotification(primary, ringing),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+            )
+        } catch (e: Exception) { }
     }
 
-    private fun buildNotification(call: Call, ringing: Boolean): Notification {
+    private fun buildNotification(call: Call, ringing: Boolean): android.app.Notification {
         val person = Person.Builder().setName(CallManager.numberOf(call)).setImportant(true).build()
         val open = PendingIntent.getActivity(
             this, 10, Intent(this, InCallActivity::class.java),
@@ -104,18 +102,11 @@ class CallService : InCallService() {
             Intent(this, CallActionReceiver::class.java).setAction(CallActionReceiver.HANGUP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val repost = PendingIntent.getBroadcast(
-            this, 13,
-            Intent(this, CallActionReceiver::class.java).setAction(CallActionReceiver.REPOST),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
         val b = NotificationCompat.Builder(this, if (ringing) CH_INCOMING else CH_ONGOING)
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
             .setOnlyAlertOnce(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setDeleteIntent(repost)     // if it is dismissed anyway, show it again
             .setContentIntent(open)
 
         if (ringing) {
@@ -127,20 +118,11 @@ class CallService : InCallService() {
             b.setStyle(NotificationCompat.CallStyle.forIncomingCall(person, hangup, answer))
                 .setFullScreenIntent(open, true)
         } else {
-            b.addAction(android.R.drawable.ic_menu_close_clear_cancel, "Hang up", hangup)
-                .setContentTitle(CallManager.numberOf(call))
-                .setContentText("Ongoing call")
-            if (call.state == Call.STATE_ACTIVE) {
-                if (activeSince == 0L) {
-                    activeSince = call.details.connectTimeMillis.takeIf { it > 0 }
-                        ?: System.currentTimeMillis()
-                }
-                b.setWhen(activeSince).setUsesChronometer(true).setShowWhen(true)
-            }
+            b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
+            val t = call.details.connectTimeMillis
+            if (t > 0) b.setWhen(t).setUsesChronometer(true).setShowWhen(true)
         }
-        val n = b.build()
-        n.flags = n.flags or Notification.FLAG_NO_CLEAR or Notification.FLAG_ONGOING_EVENT
-        return n
+        return b.build()
     }
 
     private fun startRinging() {

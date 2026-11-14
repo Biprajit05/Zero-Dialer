@@ -1,5 +1,6 @@
 package com.example.quietdialer
 
+import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract
 import android.telecom.Call
@@ -10,60 +11,71 @@ import kotlinx.coroutines.flow.StateFlow
 data class CallSnap(
     val call: Call,
     val state: Int,
-    val number: String,      // contact name if known, else the number
+    val number: String,
+    val name: String?,
     val connectTime: Long,
-    val rawNumber: String
-)
+    val canHold: Boolean
+) {
+    val title: String
+        get() = name?.takeIf { it.isNotBlank() } ?: if (number.isNotBlank()) prettyNumber(number) else "Unknown"
+    val subtitle: String?
+        get() = if (!name.isNullOrBlank() && number.isNotBlank()) prettyNumber(number) else null
+}
 
 /** Holds the live calls so the service, notification and UI all see the same thing. */
 object CallManager {
     private val live = mutableListOf<Call>()
+    private val names = HashMap<Call, String?>()
     private val _snaps = MutableStateFlow<List<CallSnap>>(emptyList())
     val snaps: StateFlow<List<CallSnap>> = _snaps
     private val _audio = MutableStateFlow<CallAudioState?>(null)
     val audio: StateFlow<CallAudioState?> = _audio
-    private val nameCache = HashMap<String, String?>()
 
-    fun add(c: Call) { if (!live.contains(c)) live.add(c); publish() }
-    fun remove(c: Call) { live.remove(c); publish() }
+    fun add(c: Call, ctx: Context) {
+        if (!live.contains(c)) {
+            live.add(c)
+            names[c] = lookupName(ctx, rawNumber(c))
+        }
+        publish()
+    }
+
+    fun remove(c: Call) { live.remove(c); names.remove(c); publish() }
     fun setAudio(a: CallAudioState) { _audio.value = a }
 
     fun primary(): Call? =
         live.firstOrNull { it.state == Call.STATE_RINGING }
+            ?: live.firstOrNull {
+                it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING || it.state == Call.STATE_CONNECTING
+            }
             ?: live.firstOrNull { it.state != Call.STATE_DISCONNECTED }
             ?: live.firstOrNull()
 
     fun publish() {
         _snaps.value = live.map {
-            CallSnap(it, it.state, numberOf(it), it.details.connectTimeMillis, rawNumberOf(it))
-        }
-    }
-
-    fun rawNumberOf(c: Call): String = c.details.handle?.schemeSpecificPart ?: ""
-
-    fun numberOf(c: Call): String {
-        val name = c.details.callerDisplayName
-        if (!name.isNullOrBlank()) return name
-        val raw = rawNumberOf(c)
-        if (raw.isBlank()) return "Unknown"
-        return contactName(raw) ?: raw
-    }
-
-    private fun contactName(number: String): String? {
-        if (nameCache.containsKey(number)) return nameCache[number]
-        val ctx = CallService.instance ?: return null
-        var name: String? = null
-        try {
-            val uri = Uri.withAppendedPath(
-                ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number)
+            val caps = it.details?.callCapabilities ?: 0
+            CallSnap(
+                it, it.state, rawNumber(it), nameOf(it),
+                it.details?.connectTimeMillis ?: 0L,
+                (caps and Call.Details.CAPABILITY_HOLD) != 0
             )
-            ctx.contentResolver.query(
-                uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null
-            )?.use { if (it.moveToFirst()) name = it.getString(0) }
-            nameCache[number] = name
-        } catch (e: Exception) {
-            // permission not granted yet: don't cache, try again next time
         }
-        return name
+    }
+
+    fun rawNumber(c: Call): String = c.details?.handle?.schemeSpecificPart ?: ""
+
+    fun nameOf(c: Call): String? =
+        names[c]?.takeIf { it.isNotBlank() } ?: c.details?.callerDisplayName?.takeIf { it.isNotBlank() }
+
+    /** Name if known, otherwise the number. Used for the notification. */
+    fun numberOf(c: Call): String =
+        nameOf(c) ?: rawNumber(c).ifBlank { "Unknown" }
+
+    private fun lookupName(ctx: Context, number: String): String? {
+        if (number.isBlank()) return null
+        return try {
+            val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
+            ctx.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)
+                ?.use { if (it.moveToFirst()) it.getString(0) else null }
+        } catch (e: Exception) { null }
     }
 }

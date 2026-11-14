@@ -12,12 +12,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -26,7 +31,7 @@ class MainActivity : ComponentActivity() {
     private val version = mutableIntStateOf(0)
 
     private val roleLauncher =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { version.intValue++ }
 
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -47,7 +52,7 @@ class MainActivity : ComponentActivity() {
                     primary = Pal.Green, onPrimary = Color.White,
                     background = Color.White, surface = Color.White
                 )
-            ) { App(initial, version.intValue) { askPermissions() } }
+            ) { App(initial, version.intValue, { askPermissions() }, { requestDialerRole() }) }
         }
         askPermissions()
     }
@@ -78,7 +83,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit) {
+fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, onRequestRole: () -> Unit) {
     val ctx = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var number by rememberSaveable { mutableStateOf(initialNumber) }
@@ -89,7 +94,24 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit) {
             withContext(Dispatchers.IO) { loadContacts(ctx) } else emptyList()
     }
 
+    val isDefault = remember(permsVersion) {
+        val rm = ctx.getSystemService(RoleManager::class.java)
+        !rm.isRoleAvailable(RoleManager.ROLE_DIALER) || rm.isRoleHeld(RoleManager.ROLE_DIALER)
+    }
+
     Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().imePadding()) {
+        if (!isDefault) {
+            Row(
+                Modifier.fillMaxWidth().background(Color(0xFFFFF1CF)).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
+                    fontSize = 13.sp, color = Color(0xFF1B1B1B), modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onRequestRole) { Text("Set default") }
+            }
+        }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 0 -> DialTab(number, { number = it }, contacts, permsVersion, onRequestPerms)
