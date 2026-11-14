@@ -21,8 +21,8 @@ class CallService : InCallService() {
 
     companion object {
         @Volatile var instance: CallService? = null
-        const val CH_INCOMING = "incoming_calls_v2"
-        const val CH_ONGOING = "ongoing_calls_v2"
+        const val CH_INCOMING = "incoming_calls_v3"
+        const val CH_ONGOING = "ongoing_calls_v3"
         const val NOTIF_ID = 1
         const val EXTRA_ANSWER = "answer"
     }
@@ -40,8 +40,8 @@ class CallService : InCallService() {
         val nm = getSystemService(NotificationManager::class.java)
         // Old channels keep their cached settings, so they are replaced by "_v2" ones that are
         // explicitly visible on the lock screen.
-        nm.deleteNotificationChannel("incoming_calls")
-        nm.deleteNotificationChannel("ongoing_calls")
+        for (old in listOf("incoming_calls", "ongoing_calls", "incoming_calls_v2", "ongoing_calls_v2"))
+            nm.deleteNotificationChannel(old)
         nm.createNotificationChannel(
             NotificationChannel(CH_INCOMING, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
                 setSound(null, null) // we play the ringtone ourselves
@@ -49,7 +49,12 @@ class CallService : InCallService() {
             }
         )
         nm.createNotificationChannel(
-            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_LOW).apply {
+            // DEFAULT (not LOW) so phones don't treat it as a "silent" notification and hide it from
+            // the lock screen; it still makes no sound or vibration.
+            NotificationChannel(CH_ONGOING, "Ongoing calls", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
         )
@@ -57,6 +62,7 @@ class CallService : InCallService() {
 
     override fun onDestroy() {
         stopRinging()
+        CallRecorder.stop(this)
         instance = null
         super.onDestroy()
     }
@@ -91,6 +97,7 @@ class CallService : InCallService() {
         val primary = CallManager.primary()
         if (primary == null) {
             stopRinging()
+            CallRecorder.stop(this)
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             return
         }
@@ -98,12 +105,16 @@ class CallService : InCallService() {
         if (ringing) startRinging() else stopRinging()
         // A notification problem must never take the whole call service down: if this service
         // crashes, Android hands the call to the phone's built-in call screen instead of ours.
+        val notif = buildNotification(primary, ringing)
+        val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+        // While recording, the service also needs the microphone type or Android silences the mic
+        // once the call screen is no longer visible.
+        val type = if (CallRecorder.active.value) base or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else base
         try {
-            ServiceCompat.startForeground(
-                this, NOTIF_ID, buildNotification(primary, ringing),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
-            )
-        } catch (e: Exception) { }
+            ServiceCompat.startForeground(this, NOTIF_ID, notif, type)
+        } catch (e: Exception) {
+            try { ServiceCompat.startForeground(this, NOTIF_ID, notif, base) } catch (e2: Exception) { }
+        }
     }
 
     private fun buildNotification(call: Call, ringing: Boolean): android.app.Notification {
@@ -123,6 +134,7 @@ class CallService : InCallService() {
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC) // show full content on the lock screen
             .setOnlyAlertOnce(true)
             .setContentIntent(open)

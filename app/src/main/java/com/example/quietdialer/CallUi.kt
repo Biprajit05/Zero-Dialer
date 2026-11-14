@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Message
@@ -52,6 +53,8 @@ fun CallScreen(
     other: CallSnap?,
     muted: Boolean,
     speaker: Boolean,
+    recording: Boolean,
+    onRecord: () -> Unit,
     onAnswer: () -> Unit,
     onDecline: () -> Unit,
     onSmsReply: (String) -> Unit,
@@ -101,6 +104,10 @@ fun CallScreen(
                 c.subtitle ?: "mobile", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp,
                 modifier = Modifier.padding(top = 4.dp)
             )
+            if (recording) {
+                Spacer(Modifier.height(8.dp))
+                Text("● Recording", color = Red, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
             if (other != null) {
                 Spacer(Modifier.height(12.dp))
                 Box(
@@ -121,7 +128,10 @@ fun CallScreen(
                     onHide = { showPad = false },
                     onEnd = onEnd
                 )
-                else -> Column(verticalArrangement = Arrangement.spacedBy(28.dp)) {
+                else -> Column(
+                    Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         RoundAction("Speaker", Icons.Default.VolumeUp, onSpeaker, active = speaker)
                         RoundAction("Hold", Icons.Default.Pause, onHold, active = onHoldNow, enabled = live && c.canHold)
@@ -129,9 +139,13 @@ fun CallScreen(
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         RoundAction("Add call", Icons.Default.Add, onAddCall, enabled = live)
-                        RoundAction("End", Icons.Default.CallEnd, onEnd, container = Red)
+                        RoundAction(
+                            if (recording) "Stop" else "Record", Icons.Default.FiberManualRecord, onRecord,
+                            active = recording, enabled = live
+                        )
                         RoundAction("Keypad", Icons.Default.Dialpad, { showPad = true }, enabled = live)
                     }
+                    RoundAction("End", Icons.Default.CallEnd, onEnd, container = Red)
                 }
             }
             Spacer(Modifier.height(36.dp))

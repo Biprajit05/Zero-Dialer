@@ -1,6 +1,9 @@
 package com.example.quietdialer
 
+import android.Manifest
 import android.content.Intent
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import android.os.Bundle
 import android.os.PowerManager
 import android.telecom.Call
@@ -14,6 +17,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 
 class InCallActivity : ComponentActivity() {
+
+    private val micPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            if (ok) startRecording()
+            else Toast.makeText(this, "Microphone permission is needed to record", Toast.LENGTH_SHORT).show()
+        }
+
+    private fun startRecording() {
+        val who = CallManager.primary()?.let { CallManager.numberOf(it) } ?: "call"
+        if (CallRecorder.start(this, who)) CallService.instance?.refreshNotification()
+        else Toast.makeText(this, "Couldn't start recording", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleRecording() {
+        when {
+            CallRecorder.active.value -> { CallRecorder.stop(this); CallService.instance?.refreshNotification() }
+            CallRecorder.hasPermission(this) -> startRecording()
+            else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var resumed = false
@@ -57,11 +80,14 @@ class InCallActivity : ComponentActivity() {
                 }
 
                 val speaker = route == CallAudioState.ROUTE_SPEAKER
+                val recording by CallRecorder.active.collectAsState()
                 CallScreen(
                     c = primary,
                     other = other,
                     muted = audio?.isMuted == true,
                     speaker = speaker,
+                    recording = recording,
+                    onRecord = { toggleRecording() },
                     onAnswer = { primary.call.answer(VideoProfile.STATE_AUDIO_ONLY) },
                     onDecline = { primary.call.reject(false, null) },
                     onSmsReply = { primary.call.reject(true, it) },
