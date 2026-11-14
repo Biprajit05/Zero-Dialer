@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Quiet Dialer</string>
+    <string name="a11y_description">Keeps the microphone available so Quiet Dialer can record calls. It does not read or change anything on your screen.</string>
 </resources>
