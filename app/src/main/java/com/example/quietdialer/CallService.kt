@@ -7,6 +7,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.os.SystemClock
+import android.view.View
+import android.widget.RemoteViews
 import android.telecom.Call
 import android.telecom.CallAudioState
 import android.telecom.InCallService
@@ -122,28 +125,53 @@ class CallService : InCallService() {
             b.setStyle(NotificationCompat.CallStyle.forIncomingCall(person, hangup, answer))
                 .setFullScreenIntent(open, true)
         } else {
-            b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
-            // Extra buttons shown next to Hang up (CallStyle allows up to 3 actions in total).
-            val muted = CallManager.isMuted()
-            val speaker = CallManager.isSpeaker()
-            b.addAction(
-                if (muted) android.R.drawable.ic_lock_silent_mode else android.R.drawable.ic_lock_silent_mode_off,
-                if (muted) "Unmute" else "Mute",
-                actionIntent(13, CallActionReceiver.MUTE)
-            )
-            b.addAction(
-                android.R.drawable.ic_btn_speak_now,
-                if (speaker) "Speaker off" else "Speaker",
-                actionIntent(14, CallActionReceiver.SPEAKER)
-            )
+            // Custom pill: name + timer on the left, Mute / Speaker / Hang up circles on the right.
+            val view = buildOngoingView(call, hangup)
+            b.setStyle(NotificationCompat.DecoratedCustomViewStyle())
+                .setCustomContentView(view)
+                .setCustomBigContentView(view)
             val t = call.details.connectTimeMillis
-            if (t > 0) b.setWhen(t).setUsesChronometer(true).setShowWhen(true)
+            if (t > 0) b.setWhen(t).setShowWhen(false)
         }
         // If the user manages to dismiss it anyway, put it straight back.
         b.setDeleteIntent(actionIntent(15, CallActionReceiver.REPOST))
         val n = b.build()
         n.flags = n.flags or android.app.Notification.FLAG_NO_CLEAR or android.app.Notification.FLAG_ONGOING_EVENT
         return n
+    }
+
+    private fun buildOngoingView(call: Call, hangup: PendingIntent): RemoteViews {
+        val v = RemoteViews(packageName, R.layout.notification_call)
+        v.setTextViewText(R.id.notif_name, CallManager.numberOf(call))
+
+        val connected = call.details.connectTimeMillis
+        if (connected > 0 && call.state == Call.STATE_ACTIVE) {
+            val base = SystemClock.elapsedRealtime() - (System.currentTimeMillis() - connected)
+            v.setChronometer(R.id.notif_timer, base, null, true)
+            v.setViewVisibility(R.id.notif_timer, View.VISIBLE)
+            v.setViewVisibility(R.id.notif_status, View.GONE)
+        } else {
+            v.setViewVisibility(R.id.notif_timer, View.GONE)
+            v.setViewVisibility(R.id.notif_status, View.VISIBLE)
+            v.setTextViewText(R.id.notif_status, if (call.state == Call.STATE_HOLDING) "On hold" else "Calling…")
+        }
+
+        // Off = grey circle + dark icon, On = blue circle + white icon.
+        val muted = CallManager.isMuted()
+        val speaker = CallManager.isSpeaker()
+        v.setInt(R.id.notif_mute, "setBackgroundResource",
+            if (muted) R.drawable.notif_btn_blue else R.drawable.notif_btn_gray)
+        v.setImageViewResource(R.id.notif_mute,
+            if (muted) R.drawable.notif_ic_mic_white else R.drawable.notif_ic_mic_dark)
+        v.setInt(R.id.notif_speaker, "setBackgroundResource",
+            if (speaker) R.drawable.notif_btn_blue else R.drawable.notif_btn_gray)
+        v.setImageViewResource(R.id.notif_speaker,
+            if (speaker) R.drawable.notif_ic_speaker_white else R.drawable.notif_ic_speaker_dark)
+
+        v.setOnClickPendingIntent(R.id.notif_mute, actionIntent(13, CallActionReceiver.MUTE))
+        v.setOnClickPendingIntent(R.id.notif_speaker, actionIntent(14, CallActionReceiver.SPEAKER))
+        v.setOnClickPendingIntent(R.id.notif_end, hangup)
+        return v
     }
 
     private fun actionIntent(requestCode: Int, action: String) = PendingIntent.getBroadcast(
