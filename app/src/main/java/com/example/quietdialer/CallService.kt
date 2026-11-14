@@ -71,6 +71,9 @@ class CallService : InCallService() {
         CallManager.setAudio(audioState)
     }
 
+    /** Re-posts the call notification. Kept public so receivers/other code can call it. */
+    fun refreshNotification() = onCallsChanged()
+
     private fun onCallsChanged() {
         CallManager.publish()
         val primary = CallManager.primary()
