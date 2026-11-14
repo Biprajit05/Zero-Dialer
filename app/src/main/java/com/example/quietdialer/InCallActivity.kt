@@ -20,7 +20,7 @@ class InCallActivity : ComponentActivity() {
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok) startRecording()
+            if (ok) startOrAskAccessibility()
             else Toast.makeText(this, "Microphone permission is needed to record", Toast.LENGTH_SHORT).show()
         }
 
@@ -33,9 +33,27 @@ class InCallActivity : ComponentActivity() {
     private fun toggleRecording() {
         when {
             CallRecorder.active.value -> { CallRecorder.stop(this); CallService.instance?.refreshNotification() }
-            CallRecorder.hasPermission(this) -> startRecording()
+            CallRecorder.hasPermission(this) -> startOrAskAccessibility()
             else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    private var skipAccessibilityPrompt = false
+
+    private fun startOrAskAccessibility() {
+        if (CallRecorder.a11yEnabled(this) || skipAccessibilityPrompt) { startRecording(); return }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Turn on call recording")
+            .setMessage(
+                "Android silences the microphone during calls for most apps, so recordings come out empty. " +
+                    "To fix that, open Accessibility settings, find Quiet Dialer and switch it on. " +
+                    "It is only used to keep the microphone working; it does not read your screen."
+            )
+            .setPositiveButton("Open settings") { _, _ ->
+                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+            .setNegativeButton("Record anyway") { _, _ -> skipAccessibilityPrompt = true; startRecording() }
+            .show()
     }
 
     private var wakeLock: PowerManager.WakeLock? = null

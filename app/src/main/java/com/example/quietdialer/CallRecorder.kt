@@ -30,6 +30,18 @@ object CallRecorder {
     private val _active = MutableStateFlow(false)
     val active: StateFlow<Boolean> = _active
 
+    /** True when the user has switched on Quiet Dialer under Settings > Accessibility. */
+    fun a11yEnabled(ctx: Context): Boolean {
+        val list = android.provider.Settings.Secure.getString(
+            ctx.contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        return list.split(':').any {
+            val c = android.content.ComponentName.unflattenFromString(it)
+            c != null && c.packageName == ctx.packageName &&
+                c.className.substringAfterLast('.') == "RecorderAccessibilityService"
+        }
+    }
+
     fun hasPermission(ctx: Context) =
         ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
