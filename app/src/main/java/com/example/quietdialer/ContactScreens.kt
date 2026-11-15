@@ -1,6 +1,16 @@
 package com.example.quietdialer
 
 import android.Manifest
+import android.content.Intent
+import android.media.RingtoneManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Videocam
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -66,17 +76,10 @@ fun ContactDetailScreen(contactId: Long, contacts: List<Contact>, onBack: () -> 
     var starred by remember(c.id) { mutableStateOf(c.starred) }
     var menu by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
-    val history by produceState(emptyList<LogEntry>(), numbers) {
-        value = if (hasPerm(ctx, Manifest.permission.READ_CALL_LOG)) withContext(Dispatchers.IO) {
-            val keys = numbers.map { numberKey(it) }.toSet()
-            loadLog(ctx).filter { numberKey(it.number) in keys }
-        } else emptyList()
-    }
 
-    Column(Modifier.fillMaxSize().background(Pal.Bg).verticalScroll(rememberScrollState())) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            HeaderIcon(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Pal.Ink) }
-            Spacer(Modifier.weight(1f))
+    DetailPage(
+        title = c.name, contactId = c.id, numbers = numbers, numberLabel = "Mobile", onBack = onBack,
+        actions = {
             HeaderIcon(onClick = {
                 if (setStarred(ctx, c.id, !starred)) { starred = !starred; onChanged() }
             }) {
@@ -92,53 +95,9 @@ fun ContactDetailScreen(contactId: Long, contacts: List<Contact>, onBack: () -> 
                     DropdownMenuItem(text = { Text("Delete contact", color = Pal.Red) }, onClick = { menu = false; confirm = true })
                 }
             }
-        }
-
-        Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Avatar(c.name, 84.dp, c.id)
-            Spacer(Modifier.height(14.dp))
-            Text(
-                c.name, color = Pal.Ink, fontSize = 20.sp, fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp)
-            )
-        }
-
-        numbers.forEach { n ->
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(16.dp))
-                    .background(Pal.Card).padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(prettyNumber(n), color = Pal.Ink, fontSize = 17.sp)
-                    Text("Mobile", color = Pal.Gray, fontSize = 12.sp)
-                }
-                RoundIconButton(Icons.Default.Call, "Call") { placeCall(ctx, n) }
-                Spacer(Modifier.width(10.dp))
-                RoundIconButton(Icons.Outlined.ChatBubbleOutline, "Message") { sendSms(ctx, n) }
-            }
-        }
-
-        if (history.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
-            Column(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp))
-                    .background(Pal.Card).padding(vertical = 8.dp)
-            ) {
-                Text("Recent calls", color = Pal.Gray, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                history.take(6).forEach { h ->
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 7.dp)) {
-                        Text(
-                            "${typeLabel(h.type)} · ${formatLogTime(h.date)}", color = Pal.Ink, fontSize = 14.sp,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(statusLabel(h), color = Pal.Gray, fontSize = 14.sp)
-                    }
-                }
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-    }
+        },
+        extra = { RingtoneRow(c.id) }
+    )
 
     if (confirm) {
         ConfirmDialog(
@@ -146,6 +105,179 @@ fun ContactDetailScreen(contactId: Long, contacts: List<Contact>, onBack: () -> 
             onConfirm = { confirm = false; deleteContacts(ctx, setOf(c.id)); onChanged(); onBack() },
             onDismiss = { confirm = false }
         )
+    }
+}
+
+/** Same page for a number that isn't saved as a contact (opened from the call log). */
+@Composable
+fun NumberDetailScreen(number: String, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
+    DetailPage(
+        title = if (isDialable(number)) prettyNumber(number) else "Unknown",
+        contactId = 0L, numbers = listOf(number), numberLabel = null, onBack = onBack,
+        actions = {
+            HeaderIcon(onClick = { addContactIntent(ctx, number) }) { Icon(Icons.Default.PersonAdd, "Add contact", tint = Pal.Ink) }
+            Box {
+                HeaderIcon(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More", tint = Pal.Ink) }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, modifier = Modifier.background(Pal.Sheet)) {
+                    DropdownMenuItem(text = { Text("Add to existing contact", color = Pal.Ink) }, onClick = { menu = false; addToExistingIntent(ctx, number) })
+                    DropdownMenuItem(text = { Text("Copy number", color = Pal.Ink) }, onClick = { menu = false; copyNumber(ctx, number) })
+                    DropdownMenuItem(text = { Text("Block number", color = Pal.Ink) }, onClick = { menu = false; blockNumber(ctx, number) })
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun DetailPage(
+    title: String,
+    contactId: Long,
+    numbers: List<String>,
+    numberLabel: String?,
+    onBack: () -> Unit,
+    actions: @Composable RowScope.() -> Unit,
+    extra: @Composable ColumnScope.() -> Unit = {}
+) {
+    val ctx = LocalContext.current
+    var showAll by remember { mutableStateOf(false) }
+    val history by produceState<List<LogEntry>>(emptyList(), numbers) {
+        value = if (hasPerm(ctx, Manifest.permission.READ_CALL_LOG)) withContext(Dispatchers.IO) {
+            val keys = numbers.map { numberKey(it) }.toSet()
+            loadLog(ctx).filter { numberKey(it.number) in keys }
+        } else emptyList()
+    }
+
+    Column(Modifier.fillMaxSize().background(Pal.Bg).verticalScroll(rememberScrollState())) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            HeaderIcon(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Pal.Ink) }
+            Spacer(Modifier.weight(1f))
+            actions()
+        }
+
+        Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Avatar(title, 84.dp, contactId, person = contactId <= 0L)
+            Spacer(Modifier.height(14.dp))
+            Text(
+                title, color = Pal.Ink, fontSize = 22.sp, fontWeight = FontWeight.Medium,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp)
+            )
+        }
+
+        numbers.forEach { n ->
+            val label = numberLabel
+                ?: history.firstOrNull { numberKey(it.number) == numberKey(n) }?.location?.takeIf { it.isNotBlank() }
+                ?: "Unknown location"
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(16.dp))
+                    .background(Pal.Card).padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(if (isDialable(n)) prettyNumber(n) else "Unknown", color = Pal.Ink, fontSize = 17.sp)
+                    Text(label, color = Pal.Gray, fontSize = 12.sp)
+                }
+                RoundIconButton(Icons.Default.Call, "Call") { placeCall(ctx, n) }
+                Spacer(Modifier.width(10.dp))
+                RoundIconButton(Icons.Default.Videocam, "Video call") { placeVideoCall(ctx, n) }
+                Spacer(Modifier.width(10.dp))
+                RoundIconButton(Icons.Outlined.ChatBubbleOutline, "Message") { sendSms(ctx, n) }
+            }
+        }
+
+        if (history.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 18.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Call logs", color = Pal.Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                if (history.size > 3) {
+                    Row(
+                        Modifier.clip(RoundedCornerShape(8.dp)).clickable { showAll = !showAll }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(if (showAll) "Less" else "All", color = Pal.Gray, fontSize = 14.sp)
+                        Icon(
+                            if (showAll) Icons.Default.KeyboardArrowUp else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            null, tint = Pal.Gray, modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+            val shown = if (showAll) history else history.take(3)
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(Pal.Card)) {
+                shown.forEachIndexed { i, e ->
+                    DetailLogRow(e)
+                    if (i < shown.lastIndex) HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Pal.Divider, thickness = 0.5.dp)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+        extra()
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun DetailLogRow(e: LogEntry) {
+    val missed = e.type == android.provider.CallLog.Calls.MISSED_TYPE
+    val result = when {
+        missed -> "Missed"
+        e.type == android.provider.CallLog.Calls.REJECTED_TYPE -> "Declined"
+        e.type == 6 -> "Blocked"
+        e.duration > 0 -> "${typeLabel(e.type)} ${durationWords(e.duration)}"
+        else -> "${typeLabel(e.type)} · not connected"
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(formatLogTime(e.date), color = if (missed) Pal.Missed else Pal.Ink, fontSize = 16.sp)
+            Spacer(Modifier.height(3.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (e.isHd) { TagChip("HD"); Spacer(Modifier.width(4.dp)) }
+                if (e.isWifi) { TagChip("Wi-Fi"); Spacer(Modifier.width(4.dp)) }
+                Text(prettyNumber(e.number), color = Pal.Gray, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(result, color = Pal.Gray, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun RingtoneRow(contactId: Long) {
+    val ctx = LocalContext.current
+    var uri by remember(contactId) { mutableStateOf(readRingtone(ctx, contactId)) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        if (r.resultCode == android.app.Activity.RESULT_OK) {
+            @Suppress("DEPRECATION")
+            val picked = r.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            val value = if (picked == null || picked == Settings.System.DEFAULT_RINGTONE_URI) null else picked
+            if (setRingtone(ctx, contactId, value)) uri = value
+        }
+    }
+    val label = remember(uri) { ringtoneTitle(ctx, uri) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(Pal.Card)
+            .clickable {
+                val i = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_RINGTONE)
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Ringtone")
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                    uri?.let { u -> putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, u) }
+                }
+                try { launcher.launch(i) } catch (e: Exception) {
+                    Toast.makeText(ctx, "No ringtone picker found", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("Ringtone", color = Pal.Ink, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Pal.Gray, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 160.dp))
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = Pal.Gray, modifier = Modifier.size(20.dp))
     }
 }
 

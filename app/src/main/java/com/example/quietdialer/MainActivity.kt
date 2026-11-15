@@ -98,6 +98,7 @@ class MainActivity : ComponentActivity() {
 sealed interface Overlay {
     data class Detail(val id: Long) : Overlay
     data class NewContact(val number: String = "") : Overlay
+    data class Number(val number: String) : Overlay
     object PickFavorite : Overlay
 }
 
@@ -147,6 +148,11 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                         0 -> DialTab(
                             number, { number = it }, contacts, permsVersion, onRequestPerms,
                             onNewContact = { overlay = Overlay.NewContact(it) },
+                            onOpenInfo = { num ->
+                                val k = numberKey(num)
+                                val match = if (k.isNotEmpty()) contacts.firstOrNull { numberKey(it.number) == k } else null
+                                overlay = if (match != null) Overlay.Detail(match.id) else Overlay.Number(num)
+                            },
                             onBarHidden = { barHidden = it }
                         )
                         1 -> ContactsTab(
@@ -186,6 +192,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                         is Overlay.Detail -> ContactDetailScreen(
                             o.id, contacts, onBack = { overlay = null }, onChanged = { contactsVersion++ }
                         )
+                        is Overlay.Number -> NumberDetailScreen(o.number, onBack = { overlay = null })
                         is Overlay.NewContact -> NewContactScreen(
                             o.number, onClose = { overlay = null },
                             onSaved = { contactsVersion++; overlay = null }

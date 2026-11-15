@@ -70,6 +70,7 @@ fun DialTab(
     permsVersion: Int,
     onRequestPerms: () -> Unit,
     onNewContact: (String) -> Unit,
+    onOpenInfo: (String) -> Unit,
     onBarHidden: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
@@ -86,7 +87,6 @@ fun DialTab(
     var menuOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    var detail by remember { mutableStateOf<LogEntry?>(null) }
 
     val listState = rememberLazyListState()
     val collapsed by remember {
@@ -221,7 +221,7 @@ fun DialTab(
                             onLong = {
                                 if (!selecting) { selecting = true; searching = false; selected = setOf(e.id) }
                             },
-                            onInfo = { detail = e }
+                            onInfo = { onOpenInfo(e.number) }
                         )
                     }
                     item { Spacer(Modifier.height(80.dp)) }
@@ -262,15 +262,6 @@ fun DialTab(
                 )
             }
         }
-    }
-
-    detail?.let { e ->
-        val nm = nameFor(e, nameMap)
-        ActionDialog(
-            name = nm, number = e.number,
-            history = (all ?: emptyList()).filter { numberKey(it.number) == numberKey(e.number) },
-            onDismiss = { detail = null }
-        )
     }
 
     if (confirmDelete) {

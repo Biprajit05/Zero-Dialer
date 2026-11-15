@@ -304,3 +304,42 @@ fun saveContact(ctx: Context, name: String, phone: String, email: String, compan
         ctx.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops); true
     } catch (e: Exception) { false }
 }
+
+fun placeVideoCall(ctx: Context, number: String) {
+    if (number.isBlank() || !isDialable(number)) return
+    try {
+        val extras = android.os.Bundle().apply {
+            putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, android.telecom.VideoProfile.STATE_BIDIRECTIONAL)
+        }
+        ctx.getSystemService(TelecomManager::class.java)
+            .placeCall(Uri.fromParts("tel", number, null), extras)
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "Video calling isn't available", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** The contact's own ringtone, or null when it follows the system ringtone. */
+fun readRingtone(ctx: Context, contactId: Long): Uri? = try {
+    ctx.contentResolver.query(
+        android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId),
+        arrayOf(ContactsContract.Contacts.CUSTOM_RINGTONE), null, null, null
+    )?.use { cur ->
+        if (cur.moveToFirst()) cur.getString(0)?.takeIf { s -> s.isNotBlank() }?.let { s -> Uri.parse(s) } else null
+    }
+} catch (e: Exception) { null }
+
+fun setRingtone(ctx: Context, contactId: Long, uri: Uri?): Boolean = try {
+    val v = android.content.ContentValues().apply { put(ContactsContract.Contacts.CUSTOM_RINGTONE, uri?.toString()) }
+    ctx.contentResolver.update(
+        android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId), v, null, null
+    ) > 0
+} catch (e: Exception) {
+    Toast.makeText(ctx, "Contacts permission needed", Toast.LENGTH_SHORT).show(); false
+}
+
+fun ringtoneTitle(ctx: Context, uri: Uri?): String =
+    if (uri == null) "Follow system"
+    else try { android.media.RingtoneManager.getRingtone(ctx, uri)?.getTitle(ctx) ?: "Custom" } catch (e: Exception) { "Custom" }
+
+fun durationWords(s: Long): String =
+    if (s < 60) "$s sec" else "${s / 60} min ${s % 60} sec"
