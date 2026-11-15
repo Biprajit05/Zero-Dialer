@@ -96,7 +96,8 @@ class FakeCallReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = NotificationCompat.Builder(ctx, FakeCall.CH)
-            .setSmallIcon(android.R.drawable.sym_call_incoming)
+            .setSmallIcon(R.drawable.ic_stat_call)
+            .setLargeIcon(android.graphics.BitmapFactory.decodeResource(ctx.resources, R.drawable.ic_logo))
             .setContentTitle(name.ifBlank { number })
             .setContentText("Incoming call")
             .setCategory(NotificationCompat.CATEGORY_CALL)

@@ -145,6 +145,7 @@ class CallService : InCallService() {
         )
         val b = NotificationCompat.Builder(this, if (ringing) CH_INCOMING else CH_ONGOING)
             .setSmallIcon(R.drawable.ic_stat_call)
+            .setLargeIcon(android.graphics.BitmapFactory.decodeResource(resources, R.drawable.ic_logo))
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
