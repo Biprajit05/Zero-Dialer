@@ -8,18 +8,26 @@ import android.telecom.CallAudioState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/** One person in a conference call. */
+data class Participant(val call: Call, val label: String)
+
 data class CallSnap(
     val call: Call,
     val state: Int,
     val number: String,
     val name: String?,
     val connectTime: Long,
-    val canHold: Boolean
+    val canHold: Boolean,
+    val isConference: Boolean = false,
+    val participants: List<Participant> = emptyList(),
+    val hd: Boolean = false,
+    val canMerge: Boolean = false
 ) {
     val title: String
-        get() = name?.takeIf { it.isNotBlank() } ?: if (number.isNotBlank()) prettyNumber(number) else "Unknown"
+        get() = if (isConference) "Conference Call"
+        else name?.takeIf { it.isNotBlank() } ?: if (number.isNotBlank()) prettyNumber(number) else "Unknown"
     val subtitle: String?
-        get() = if (!name.isNullOrBlank() && number.isNotBlank()) prettyNumber(number) else null
+        get() = if (!isConference && !name.isNullOrBlank() && number.isNotBlank()) prettyNumber(number) else null
 }
 
 /** Holds the live calls so the service, notification and UI all see the same thing. */
@@ -56,21 +64,37 @@ object CallManager {
         svc.setAudioRoute(if (isSpeaker()) back else CallAudioState.ROUTE_SPEAKER)
     }
 
-    fun primary(): Call? =
-        live.firstOrNull { it.state == Call.STATE_RINGING }
-            ?: live.firstOrNull {
+    /** The call the screen and notification are about. People inside a conference are skipped: the conference itself counts. */
+    fun primary(): Call? {
+        val roots = live.filter { it.parent == null }.ifEmpty { live }
+        return roots.firstOrNull { it.state == Call.STATE_RINGING }
+            ?: roots.firstOrNull {
                 it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING || it.state == Call.STATE_CONNECTING
             }
-            ?: live.firstOrNull { it.state != Call.STATE_DISCONNECTED }
-            ?: live.firstOrNull()
+            ?: roots.firstOrNull { it.state != Call.STATE_DISCONNECTED }
+            ?: roots.firstOrNull()
+    }
+
+    /** Joins this call and the one on hold into a conference. */
+    fun merge(c: Call) {
+        val caps = c.details?.callCapabilities ?: 0
+        if ((caps and Call.Details.CAPABILITY_MERGE_CONFERENCE) != 0) c.mergeConference()
+        else c.conferenceableCalls.firstOrNull()?.let { c.conference(it) }
+    }
 
     fun publish() {
-        _snaps.value = live.map {
-            val caps = it.details?.callCapabilities ?: 0
+        _snaps.value = live.map { call ->
+            val d = call.details
+            val caps = d?.callCapabilities ?: 0
+            val conf = d?.hasProperty(Call.Details.PROPERTY_CONFERENCE) == true
             CallSnap(
-                it, it.state, rawNumber(it), nameOf(it),
-                it.details?.connectTimeMillis ?: 0L,
-                (caps and Call.Details.CAPABILITY_HOLD) != 0
+                call, call.state, rawNumber(call), nameOf(call),
+                d?.connectTimeMillis ?: 0L,
+                (caps and Call.Details.CAPABILITY_HOLD) != 0,
+                isConference = conf,
+                participants = if (conf) call.children.map { ch -> Participant(ch, labelOf(ch)) } else emptyList(),
+                hd = d?.hasProperty(Call.Details.PROPERTY_HIGH_DEF_AUDIO) == true,
+                canMerge = (caps and Call.Details.CAPABILITY_MERGE_CONFERENCE) != 0 || call.conferenceableCalls.isNotEmpty()
             )
         }
     }
@@ -82,7 +106,12 @@ object CallManager {
 
     /** Name if known, otherwise the number. Used for the notification. */
     fun numberOf(c: Call): String =
-        nameOf(c) ?: rawNumber(c).ifBlank { "Unknown" }
+        if (c.details?.hasProperty(Call.Details.PROPERTY_CONFERENCE) == true) "Conference Call"
+        else nameOf(c) ?: rawNumber(c).ifBlank { "Unknown" }
+
+    /** Name if known, otherwise the formatted number. Used for people inside a conference. */
+    fun labelOf(c: Call): String =
+        nameOf(c) ?: rawNumber(c).takeIf { it.isNotBlank() }?.let { prettyNumber(it) } ?: "Unknown"
 
     private fun lookupName(ctx: Context, number: String): String? {
         if (number.isBlank()) return null

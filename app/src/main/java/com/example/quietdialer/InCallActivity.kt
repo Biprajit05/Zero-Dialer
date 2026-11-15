@@ -74,18 +74,20 @@ class InCallActivity : ComponentActivity() {
             MaterialTheme {
                 val snaps by CallManager.snaps.collectAsState()
                 val audio by CallManager.audio.collectAsState()
-                val primary = snaps.firstOrNull { it.state == Call.STATE_RINGING }
-                    ?: snaps.firstOrNull {
+                // People inside a conference are shown by the conference call itself.
+                val roots = snaps.filter { it.call.parent == null }.ifEmpty { snaps }
+                val primary = roots.firstOrNull { it.state == Call.STATE_RINGING }
+                    ?: roots.firstOrNull {
                         it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING ||
                             it.state == Call.STATE_CONNECTING
                     }
-                    ?: snaps.firstOrNull()
+                    ?: roots.firstOrNull()
 
                 if (primary == null) {
                     LaunchedEffect(Unit) { finish() }
                     return@MaterialTheme
                 }
-                val other = snaps.firstOrNull { it.call != primary.call && it.state == Call.STATE_HOLDING }
+                val other = roots.firstOrNull { it.call != primary.call && it.state == Call.STATE_HOLDING }
 
                 val route = audio?.route ?: CallAudioState.ROUTE_EARPIECE
                 val inCallNow = primary.state == Call.STATE_ACTIVE ||
@@ -128,7 +130,9 @@ class InCallActivity : ComponentActivity() {
                     onMessages = { sendSms(this@InCallActivity, primary.number) },
                     onEnd = { primary.call.disconnect() },
                     onDtmf = { ch, down -> if (down) primary.call.playDtmfTone(ch) else primary.call.stopDtmfTone() },
-                    onSwap = { other?.call?.unhold() }
+                    onSwap = { other?.call?.unhold() },
+                    onMerge = { CallManager.merge(primary.call) },
+                    onEndCall = { it.disconnect() }
                 )
             }
         }

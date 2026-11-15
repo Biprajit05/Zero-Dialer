@@ -34,6 +34,9 @@ class CallService : InCallService() {
     private val cb = object : Call.Callback() {
         override fun onStateChanged(call: Call, state: Int) = onCallsChanged()
         override fun onDetailsChanged(call: Call, details: Call.Details) = onCallsChanged()
+        override fun onChildrenChanged(call: Call, children: List<Call>) = onCallsChanged()
+        override fun onParentChanged(call: Call, parent: Call?) = onCallsChanged()
+        override fun onConferenceableCallsChanged(call: Call, conferenceableCalls: List<Call>) = onCallsChanged()
     }
 
     override fun onCreate() {
