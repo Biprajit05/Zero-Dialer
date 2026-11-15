@@ -156,13 +156,12 @@ class CallService : InCallService() {
                 .setCustomHeadsUpContentView(v)
                 .setFullScreenIntent(open, true)
         } else {
-            // Custom pill: name + timer on the left, Mute / Speaker / Hang up circles on the right.
+            // Plain custom view on the system notification surface: name + timer on the left,
+            // Mute / Speaker / Hang up on the right. No big view, so no expand arrow.
             val view = buildOngoingView(call, hangup)
-            b.setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomContentView(view)
-                .setCustomBigContentView(view)
+            b.setCustomContentView(view).setShowWhen(false)
             val t = call.details.connectTimeMillis
-            if (t > 0) b.setWhen(t).setShowWhen(false)
+            if (t > 0) b.setWhen(t)
         }
         // If the user manages to dismiss it anyway, put it straight back.
         b.setDeleteIntent(actionIntent(15, CallActionReceiver.REPOST))
@@ -187,17 +186,20 @@ class CallService : InCallService() {
             v.setTextViewText(R.id.notif_status, if (call.state == Call.STATE_HOLDING) "On hold" else "Calling…")
         }
 
-        // Off = dark circle + white icon, On = white circle + dark icon.
+        // Off = soft grey circle + icon in the system text colour (white in dark mode, black in
+        // light mode). On = blue circle + white icon.
+        val night = (resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val offIcon = if (night) android.graphics.Color.WHITE else android.graphics.Color.BLACK
         val muted = CallManager.isMuted()
         val speaker = CallManager.isSpeaker()
         v.setInt(R.id.notif_mute, "setBackgroundResource",
             if (muted) R.drawable.notif_btn_white else R.drawable.notif_btn_gray)
-        v.setImageViewResource(R.id.notif_mute,
-            if (muted) R.drawable.notif_ic_mic_dark else R.drawable.notif_ic_mic_white)
+        v.setInt(R.id.notif_mute, "setColorFilter", if (muted) android.graphics.Color.WHITE else offIcon)
         v.setInt(R.id.notif_speaker, "setBackgroundResource",
             if (speaker) R.drawable.notif_btn_white else R.drawable.notif_btn_gray)
-        v.setImageViewResource(R.id.notif_speaker,
-            if (speaker) R.drawable.notif_ic_speaker_dark else R.drawable.notif_ic_speaker_white)
+        v.setInt(R.id.notif_speaker, "setColorFilter", if (speaker) android.graphics.Color.WHITE else offIcon)
 
         v.setOnClickPendingIntent(R.id.notif_mute, actionIntent(13, CallActionReceiver.MUTE))
         v.setOnClickPendingIntent(R.id.notif_speaker, actionIntent(14, CallActionReceiver.SPEAKER))
