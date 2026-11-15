@@ -58,20 +58,25 @@ import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Dark theme with green accents. */
+/** Colours for the current theme (dark or light), always with green accents. */
 object Pal {
-    val Bg = Color(0xFF000000)
-    val Card = Color(0xFF1C1C1E)
-    val Sheet = Color(0xFF2B2B2D)
-    val Field = Color(0xFF1F1F21)
-    val Chip = Color(0xFF3A3A3C)
-    val Green = Color(0xFF30C85A)
-    val GreenDark = Color(0xFF123B20)
-    val Ink = Color(0xFFFFFFFF)
-    val Gray = Color(0xFF8E8E93)
-    val Divider = Color(0xFF262628)
-    val Red = Color(0xFFFF4B4B)
-    val Missed = Color(0xFFFF5A52)
+    var dark by mutableStateOf(true)
+
+    private fun c(d: Long, l: Long) = Color(if (dark) d else l)
+
+    val Bg get() = c(0xFF000000, 0xFFFFFFFF)
+    val Card get() = c(0xFF1C1C1E, 0xFFF2F2F5)
+    val Sheet get() = c(0xFF2B2B2D, 0xFFF0F0F3)
+    val Field get() = c(0xFF1F1F21, 0xFFF2F2F5)
+    val Chip get() = c(0xFF3A3A3C, 0xFFE3E3E8)
+    val Green get() = c(0xFF30C85A, 0xFF1FA64A)
+    val GreenDark get() = c(0xFF123B20, 0xFFD3F0DC)
+    val Ink get() = c(0xFFFFFFFF, 0xFF111111)
+    val Gray get() = c(0xFF8E8E93, 0xFF6C6C70)
+    val Divider get() = c(0xFF262628, 0xFFE4E4E8)
+    val Red get() = c(0xFFFF4B4B, 0xFFE5322D)
+    val Missed get() = c(0xFFFF5A52, 0xFFE5322D)
+    val Link get() = c(0xFF3D8BFF, 0xFF1A6DFF)
 }
 
 /** Big page title that shrinks to a small one once the list below has been scrolled. */

@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.CallLog
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -36,6 +37,8 @@ import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,6 +47,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -86,12 +94,27 @@ fun DialTab(
     var missedOnly by rememberSaveable { mutableStateOf(false) }
     var padVisible by rememberSaveable { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
+    var themeOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val collapsed by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 30 }
+    }
+
+    // Any finger scroll/swipe on the recents list closes the keypad and reveals the All / Missed
+    // switch, which then stays until the app is opened fresh next time.
+    val scrollWatcher = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y != 0f) {
+                    padVisible = false
+                    DialUiState.filterRevealed = true
+                }
+                return Offset.Zero
+            }
+        }
     }
 
     val canRead = remember(permsVersion) { hasPerm(ctx, Manifest.permission.READ_CALL_LOG) }
@@ -181,6 +204,10 @@ fun DialTab(
                             onClick = { menuOpen = false; onOpenCallBg() }
                         )
                         DropdownMenuItem(
+                            text = { Text("Theme", color = Pal.Ink) },
+                            onClick = { menuOpen = false; themeOpen = true }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Clear call log", color = Pal.Ink) },
                             onClick = { menuOpen = false; confirmClear = true }
                         )
@@ -190,9 +217,10 @@ fun DialTab(
             AnimatedVisibility(visible = searching) {
                 SearchPill(query, { query = it }, "Search calls", autoFocus = true, onClose = { searching = false; query = "" })
             }
-            // The All / Missed switch slides in once the list is scrolled (and stays while Missed is on).
+            // The All / Missed switch slides in on the first scroll and then stays (until the app is
+            // opened fresh next time); it is also always shown while Missed is on.
             AnimatedVisibility(
-                visible = (collapsed || missedOnly) && !searching,
+                visible = (DialUiState.filterRevealed || missedOnly) && !searching,
                 enter = fadeIn(tween(180)) + expandVertically(tween(180)),
                 exit = fadeOut(tween(150)) + shrinkVertically(tween(150))
             ) { FilterPill(missedOnly) { missedOnly = it } }
@@ -201,16 +229,17 @@ fun DialTab(
         // ---------- list area ----------
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                number.isNotEmpty() && !selecting -> Suggestions(number, contacts, onNewContact) {
-                    placeCall(ctx, it); onNumber("")
-                }
+                number.isNotEmpty() && !selecting -> Suggestions(
+                    number = number, contacts = contacts, showNumber = !padVisible,
+                    onNewContact = onNewContact
+                ) { placeCall(ctx, it); onNumber("") }
                 !canRead -> PermissionPrompt("Allow call log access to see your recent calls.", onRequestPerms)
                 all == null -> Text("Loading…", Modifier.align(Alignment.Center), color = Pal.Gray)
                 shown.isEmpty() -> Text(
                     if (missedOnly) "No missed calls" else "No recent calls",
                     Modifier.align(Alignment.Center), color = Pal.Gray
                 )
-                else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize().nestedScroll(scrollWatcher)) {
                     items(shown, key = { it.id }) { e ->
                         val nm = nameFor(e, nameMap)
                         RecentRow(
@@ -241,7 +270,7 @@ fun DialTab(
                 exit = fadeOut(tween(150)) + scaleOut(tween(150))
             ) {
                 Box(
-                    Modifier.size(54.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF1E1E20))
+                    Modifier.size(54.dp).clip(RoundedCornerShape(16.dp)).background(Pal.Card)
                         .border(1.dp, Pal.Chip, RoundedCornerShape(16.dp)).clickable { padVisible = true },
                     contentAlignment = Alignment.Center
                 ) { DotsGlyph() }
@@ -259,6 +288,12 @@ fun DialTab(
             ) {
                 Keypad(
                     number = number,
+                    onPaste = { text ->
+                        val clean = text.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+                        if (clean.isEmpty()) Toast.makeText(ctx, "No number to paste", Toast.LENGTH_SHORT).show()
+                        else onNumber((number + clean).take(32))
+                    },
+                    onCopy = { copyNumber(ctx, number) },
                     onKey = { key(it) },
                     onHide = { padVisible = false },
                     onCall = { call() },
@@ -267,6 +302,14 @@ fun DialTab(
                 )
             }
         }
+    }
+
+    if (themeOpen) {
+        ThemeDialog(
+            current = ThemeSettings.mode,
+            onPick = { ThemeSettings.save(ctx, it); themeOpen = false },
+            onDismiss = { themeOpen = false }
+        )
     }
 
     if (confirmDelete) {
@@ -315,13 +358,18 @@ private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
 @Composable
 private fun Keypad(
     number: String,
+    onPaste: (String) -> Unit,
+    onCopy: () -> Unit,
     onKey: (String) -> Unit,
     onHide: () -> Unit,
     onCall: () -> Unit,
     onBackspace: () -> Unit,
     onClear: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(Pal.Bg).padding(horizontal = 24.dp)) {
+    Column(Modifier.fillMaxWidth().background(Pal.Bg)) {
+        HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
+        NumberBar(number, onPaste, onCopy)
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
         KEYS.forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { (d, letters) ->
@@ -369,6 +417,7 @@ private fun Keypad(
                 }
             }
         }
+    }
     }
 }
 
@@ -426,28 +475,76 @@ private fun RecentRow(
     }
 }
 
-/** Shown instead of recents while a number is being typed: matching contacts (smart dial). */
+/** The typed number, shown right above the keys, with paste (left) and copy (right). */
+@Composable
+private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> Unit) {
+    val ctx = LocalContext.current
+    val cm = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
+    // Re-check the clipboard whenever the typed number changes.
+    val canPaste = remember(number) { cm.hasPrimaryClip() }
+    Row(
+        Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (canPaste) HeaderIcon(onClick = {
+                val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+                onPaste(t)
+            }) { Icon(Icons.Default.ContentPaste, "Paste number", tint = Pal.Gray, modifier = Modifier.size(22.dp)) }
+        }
+        Text(
+            number,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            fontSize = when { number.length > 18 -> 22.sp; number.length > 12 -> 28.sp; else -> 34.sp },
+            color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (number.isNotEmpty()) HeaderIcon(onClick = onCopy) {
+                Icon(Icons.Default.ContentCopy, "Copy number", tint = Pal.Gray, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Shown instead of recents while a number is being typed. For a number that isn't saved yet it
+ * lists New contact / Add to existing contact / Send message / Video call, then matching contacts.
+ */
 @Composable
 private fun Suggestions(
     number: String,
     contacts: List<Contact>,
+    showNumber: Boolean,
     onNewContact: (String) -> Unit,
     onCall: (String) -> Unit
 ) {
+    val ctx = LocalContext.current
     val matches = remember(number, contacts) { contacts.filter { matchesDial(it, number) }.take(40) }
+    val key = numberKey(number)
+    val saved = remember(number, contacts) { key.isNotEmpty() && contacts.any { numberKey(it.number) == key } }
     Column(Modifier.fillMaxSize()) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        if (showNumber) {
+            // Keypad is hidden, so show the number here instead.
             Text(
                 number, fontSize = if (number.length > 14) 24.sp else 32.sp, color = Pal.Ink,
-                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
-            TextButton(onClick = { onNewContact(number) }) { Text("Add contact", color = Pal.Green) }
+            HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
         }
-        HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
         LazyColumn(Modifier.fillMaxSize()) {
+            if (!saved) {
+                item {
+                    Column {
+                        OptionRow("New contact") { onNewContact(number) }
+                        OptionRow("Add to existing contact") { addToExistingIntent(ctx, number) }
+                        OptionRow("Send message") { sendSms(ctx, number) }
+                        OptionRow("Video call") { placeVideoCall(ctx, number) }
+                        if (matches.isNotEmpty()) HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
+                    }
+                }
+            }
             items(matches, key = { "${it.id}:${numberKey(it.number)}" }) { c ->
                 Row(
                     Modifier.fillMaxWidth().clickable { onCall(c.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
@@ -463,4 +560,12 @@ private fun Suggestions(
             }
         }
     }
+}
+
+@Composable
+private fun OptionRow(label: String, onClick: () -> Unit) {
+    Text(
+        label, color = Pal.Link, fontSize = 18.sp,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp)
+    )
 }

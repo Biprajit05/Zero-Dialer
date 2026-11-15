@@ -24,6 +24,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -55,15 +57,35 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val initial = intent?.data?.schemeSpecificPart ?: ""
+        ThemeSettings.load(this)
+        if (savedInstanceState == null) DialUiState.filterRevealed = false // fresh open: hide the filter again
         setContent {
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Pal.Green, onPrimary = Color.White,
-                    background = Pal.Bg, onBackground = Color.White,
-                    surface = Pal.Sheet, onSurface = Color.White,
-                    onSurfaceVariant = Pal.Gray
-                )
-            ) { App(initial, version.intValue, { askPermissions() }, { requestDialerRole() }) }
+            val dark = when (ThemeSettings.mode) {
+                ThemeSettings.LIGHT -> false
+                ThemeSettings.DARK -> true
+                else -> isSystemInDarkTheme()
+            }
+            Pal.dark = dark
+            DisposableEffect(dark) {
+                val bars = if (dark) SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                else SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+                onDispose { }
+            }
+            val scheme = if (dark) darkColorScheme(
+                primary = Pal.Green, onPrimary = Color.White,
+                background = Pal.Bg, onBackground = Pal.Ink,
+                surface = Pal.Sheet, onSurface = Pal.Ink,
+                onSurfaceVariant = Pal.Gray
+            ) else lightColorScheme(
+                primary = Pal.Green, onPrimary = Color.White,
+                background = Pal.Bg, onBackground = Pal.Ink,
+                surface = Pal.Sheet, onSurface = Pal.Ink,
+                onSurfaceVariant = Pal.Gray
+            )
+            MaterialTheme(colorScheme = scheme) {
+                App(initial, version.intValue, { askPermissions() }, { requestDialerRole() })
+            }
         }
         askPermissions()
     }
@@ -129,12 +151,12 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
         Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
             if (!isDefault) {
                 Row(
-                    Modifier.fillMaxWidth().background(Color(0xFF3A3220)).padding(horizontal = 16.dp, vertical = 8.dp),
+                    Modifier.fillMaxWidth().background(if (Pal.dark) Color(0xFF3A3220) else Color(0xFFFFF0C9)).padding(horizontal = 16.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
-                        fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f)
+                        fontSize = 13.sp, color = Pal.Ink, modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = onRequestRole) { Text("Set default", color = Pal.Green) }
                 }
