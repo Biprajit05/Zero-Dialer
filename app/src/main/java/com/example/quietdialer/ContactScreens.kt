@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Videocam
 import android.widget.Toast
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -62,6 +64,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 // ---------------------------------------------------------------- contact details
+
+private val WA_GREEN = Color(0xFF1FAF52)
 
 @Composable
 fun ContactDetailScreen(contactId: Long, contacts: List<Contact>, onBack: () -> Unit, onChanged: () -> Unit) {
@@ -153,7 +157,7 @@ private fun DetailPage(
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             HeaderIcon(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Pal.Ink) }
             Spacer(Modifier.weight(1f))
-            actions()
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) { actions() }
         }
 
         Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -183,6 +187,22 @@ private fun DetailPage(
                 RoundIconButton(Icons.Default.Videocam, "Video call") { placeVideoCall(ctx, n) }
                 Spacer(Modifier.width(10.dp))
                 RoundIconButton(Icons.Outlined.ChatBubbleOutline, "Message") { sendSms(ctx, n) }
+            }
+            if (isDialable(n)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(16.dp))
+                        .background(Pal.Card).padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(painterResource(R.drawable.ic_whatsapp), "WhatsApp", Modifier.size(34.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text("WhatsApp", color = Pal.Ink, fontSize = 17.sp, modifier = Modifier.weight(1f))
+                    RoundIconButton(Icons.Default.Call, "WhatsApp call", WA_GREEN) { whatsappCall(ctx, n, false) }
+                    Spacer(Modifier.width(10.dp))
+                    RoundIconButton(Icons.Default.Videocam, "WhatsApp video call", WA_GREEN) { whatsappCall(ctx, n, true) }
+                    Spacer(Modifier.width(10.dp))
+                    RoundIconButton(Icons.Outlined.ChatBubbleOutline, "WhatsApp message", WA_GREEN) { whatsappMessage(ctx, n) }
+                }
             }
         }
 
@@ -282,11 +302,11 @@ private fun RingtoneRow(contactId: Long) {
 }
 
 @Composable
-private fun RoundIconButton(icon: ImageVector, desc: String, onClick: () -> Unit) {
+private fun RoundIconButton(icon: ImageVector, desc: String, tint: Color = Pal.Ink, onClick: () -> Unit) {
     Box(
         Modifier.size(40.dp).bounceClick(shape = CircleShape, pressedScale = 0.86f, onClick = onClick).background(Pal.Chip),
         contentAlignment = Alignment.Center
-    ) { Icon(icon, desc, tint = Pal.Ink, modifier = Modifier.size(20.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(20.dp)) }
 }
 
 // ---------------------------------------------------------------- new contact

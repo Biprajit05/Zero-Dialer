@@ -380,3 +380,69 @@ fun regionLabel(number: String): String {
     }
     return if (isDialable(n)) Locale.getDefault().displayCountry else ""
 }
+
+// ---------------------------------------------------------------- WhatsApp
+
+private fun whatsappPackage(ctx: Context): String? =
+    listOf("com.whatsapp", "com.whatsapp.w4b").firstOrNull {
+        try { ctx.packageManager.getPackageInfo(it, 0); true } catch (e: Exception) { false }
+    }
+
+/** Number as WhatsApp wants it: country code + digits, no "+". Uses the SIM / locale country if none is typed. */
+private fun whatsappDigits(ctx: Context, number: String): String {
+    val raw = number.trim()
+    if (raw.startsWith("+")) return digitsOf(raw)
+    val tm = ctx.getSystemService(android.telephony.TelephonyManager::class.java)
+    val iso = listOf(tm?.simCountryIso, tm?.networkCountryIso, Locale.getDefault().country)
+        .firstOrNull { !it.isNullOrBlank() }.orEmpty().uppercase()
+    val e164 = try { PhoneNumberUtils.formatNumberToE164(raw, iso) } catch (e: Exception) { null }
+    return digitsOf(e164 ?: raw)
+}
+
+/** Opens the WhatsApp chat with this number. */
+fun whatsappMessage(ctx: Context, number: String) {
+    val pkg = whatsappPackage(ctx)
+    if (pkg == null) { Toast.makeText(ctx, "WhatsApp isn't installed", Toast.LENGTH_SHORT).show(); return }
+    try {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/" + whatsappDigits(ctx, number))).setPackage(pkg)
+        )
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "Couldn't open WhatsApp", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Starts a WhatsApp voice or video call. WhatsApp has no public link for calls, so this uses the call
+ * entries WhatsApp adds to the phone's contacts - which means the number must be saved as a contact.
+ */
+fun whatsappCall(ctx: Context, number: String, video: Boolean) {
+    val pkg = whatsappPackage(ctx)
+    if (pkg == null) { Toast.makeText(ctx, "WhatsApp isn't installed", Toast.LENGTH_SHORT).show(); return }
+    val mime = "vnd.android.cursor.item/vnd.$pkg." + (if (video) "video" else "voip") + ".call"
+    val key = numberKey(number)
+    var id = -1L
+    try {
+        ctx.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID, ContactsContract.Data.DATA1),
+            ContactsContract.Data.MIMETYPE + "=?", arrayOf(mime), null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val jid = c.getString(1).orEmpty().substringBefore('@')
+                if (key.isNotEmpty() && digitsOf(jid).takeLast(10) == key) { id = c.getLong(0); break }
+            }
+        }
+    } catch (e: Exception) { }
+    if (id < 0) {
+        Toast.makeText(ctx, "Save this number as a contact (and be on WhatsApp) to call from here", Toast.LENGTH_LONG).show()
+        return
+    }
+    try {
+        ctx.startActivity(
+            Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://com.android.contacts/data/" + id), mime).setPackage(pkg)
+        )
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "Couldn't start the WhatsApp call", Toast.LENGTH_SHORT).show()
+    }
+}
