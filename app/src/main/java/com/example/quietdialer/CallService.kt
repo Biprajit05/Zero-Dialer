@@ -147,6 +147,7 @@ class CallService : InCallService() {
             )
             val v = RemoteViews(packageName, R.layout.notification_incoming)
             v.setTextViewText(R.id.inc_name, CallManager.numberOf(call))
+            v.setTextViewText(R.id.inc_sub, regionLabel(CallManager.rawNumber(call)).ifBlank { "mobile" })
             v.setOnClickPendingIntent(R.id.inc_decline, hangup)
             v.setOnClickPendingIntent(R.id.inc_accept, answer)
             b.setStyle(NotificationCompat.DecoratedCustomViewStyle())

@@ -100,6 +100,7 @@ sealed interface Overlay {
     data class NewContact(val number: String = "") : Overlay
     data class Number(val number: String) : Overlay
     object PickFavorite : Overlay
+    object CallBackground : Overlay
 }
 
 @Composable
@@ -153,6 +154,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                                 val match = if (k.isNotEmpty()) contacts.firstOrNull { numberKey(it.number) == k } else null
                                 overlay = if (match != null) Overlay.Detail(match.id) else Overlay.Number(num)
                             },
+                            onOpenCallBg = { overlay = Overlay.CallBackground },
                             onBarHidden = { barHidden = it }
                         )
                         1 -> ContactsTab(
@@ -197,6 +199,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                             o.number, onClose = { overlay = null },
                             onSaved = { contactsVersion++; overlay = null }
                         )
+                        Overlay.CallBackground -> CallBackgroundScreen(onBack = { overlay = null })
                         Overlay.PickFavorite -> PickFavoriteScreen(
                             contacts, onBack = { overlay = null },
                             onPicked = { contactsVersion++; overlay = null }

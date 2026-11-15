@@ -343,3 +343,24 @@ fun ringtoneTitle(ctx: Context, uri: Uri?): String =
 
 fun durationWords(s: Long): String =
     if (s < 60) "$s sec" else "${s / 60} min ${s % 60} sec"
+
+private val CALLING_CODES = mapOf(
+    "1" to "United States / Canada", "7" to "Russia", "20" to "Egypt", "27" to "South Africa", "33" to "France",
+    "34" to "Spain", "39" to "Italy", "44" to "United Kingdom", "49" to "Germany", "55" to "Brazil",
+    "60" to "Malaysia", "61" to "Australia", "62" to "Indonesia", "63" to "Philippines", "65" to "Singapore",
+    "66" to "Thailand", "81" to "Japan", "82" to "South Korea", "84" to "Vietnam", "86" to "China",
+    "91" to "India", "92" to "Pakistan", "93" to "Afghanistan", "94" to "Sri Lanka", "95" to "Myanmar",
+    "234" to "Nigeria", "880" to "Bangladesh", "966" to "Saudi Arabia", "965" to "Kuwait", "968" to "Oman",
+    "971" to "United Arab Emirates", "973" to "Bahrain", "974" to "Qatar", "975" to "Bhutan", "977" to "Nepal"
+)
+
+/** Country shown under the caller's name: from the +code if there is one, else the phone's own country. */
+fun regionLabel(number: String): String {
+    val n = number.trim()
+    if (n.startsWith("+") || n.startsWith("00")) {
+        val d = digitsOf(n).let { if (n.startsWith("00")) it.drop(2) else it }
+        for (len in 3 downTo 1) CALLING_CODES[d.take(len)]?.let { return it }
+        return ""
+    }
+    return if (isDialable(n)) Locale.getDefault().displayCountry else ""
+}

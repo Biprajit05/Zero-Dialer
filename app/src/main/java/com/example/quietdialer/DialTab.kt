@@ -71,6 +71,7 @@ fun DialTab(
     onRequestPerms: () -> Unit,
     onNewContact: (String) -> Unit,
     onOpenInfo: (String) -> Unit,
+    onOpenCallBg: () -> Unit,
     onBarHidden: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
@@ -175,6 +176,10 @@ fun DialTab(
                         expanded = menuOpen, onDismissRequest = { menuOpen = false },
                         modifier = Modifier.background(Pal.Sheet)
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Call background", color = Pal.Ink) },
+                            onClick = { menuOpen = false; onOpenCallBg() }
+                        )
                         DropdownMenuItem(
                             text = { Text("Clear call log", color = Pal.Ink) },
                             onClick = { menuOpen = false; confirmClear = true }

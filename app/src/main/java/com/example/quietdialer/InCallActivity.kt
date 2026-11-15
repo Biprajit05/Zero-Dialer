@@ -120,6 +120,12 @@ class InCallActivity : ComponentActivity() {
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                         )
                     },
+                    onVideo = {
+                        val vc = primary.call.videoCall
+                        if (vc != null) vc.sendSessionModifyRequest(VideoProfile(VideoProfile.STATE_BIDIRECTIONAL))
+                        else Toast.makeText(this@InCallActivity, "Video call isn't available right now", Toast.LENGTH_SHORT).show()
+                    },
+                    onMessages = { sendSms(this@InCallActivity, primary.number) },
                     onEnd = { primary.call.disconnect() },
                     onDtmf = { ch, down -> if (down) primary.call.playDtmfTone(ch) else primary.call.stopDtmfTone() },
                     onSwap = { other?.call?.unhold() }
