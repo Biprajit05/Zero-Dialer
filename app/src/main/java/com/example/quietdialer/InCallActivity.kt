@@ -46,7 +46,7 @@ class InCallActivity : ComponentActivity() {
             .setTitle("Turn on call recording")
             .setMessage(
                 "Android silences the microphone during calls for most apps, so recordings come out empty. " +
-                    "To fix that, open Accessibility settings, find Quiet Dialer and switch it on. " +
+                    "To fix that, open Accessibility settings, find Phone and switch it on. " +
                     "It is only used to keep the microphone working; it does not read your screen."
             )
             .setPositiveButton("Open settings") { _, _ ->

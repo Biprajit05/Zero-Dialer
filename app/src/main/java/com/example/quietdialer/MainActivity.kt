@@ -158,7 +158,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
+                        "Phone isn't your default phone app, so calls open the phone's own screen.",
                         fontSize = 13.sp, color = Pal.Ink, modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = onRequestRole) { Text("Set default", color = Pal.Green) }

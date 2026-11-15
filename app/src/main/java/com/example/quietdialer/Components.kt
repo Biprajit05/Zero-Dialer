@@ -77,6 +77,9 @@ object Pal {
     val Chip get() = c(0xFF3A3A3C, 0xFFE4E4E4)
     val Green get() = c(0xFF3FBF2E, 0xFF43B02A)
     val GreenDark get() = c(0xFF1D4A19, 0xFFC9F6BF)
+    /** Highlight + text of the Missed side of the All / Missed switch. */
+    val MissedPill get() = c(0xFF5A1D1B, 0xFFFFA9A6)
+    val MissedPillText get() = c(0xFFFF6B63, 0xFFC00000)
     val Ink get() = c(0xFFFFFFFF, 0xFF121212)
     val Gray get() = c(0xFF9A9AA0, 0xFF666666)
     val Divider get() = c(0xFF2A2A2C, 0xFFD3D3D3)

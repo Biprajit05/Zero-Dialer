@@ -271,7 +271,7 @@ fun blockNumber(ctx: Context, number: String) {
         ctx.contentResolver.insert(android.provider.BlockedNumberContract.BlockedNumbers.CONTENT_URI, v)
         Toast.makeText(ctx, "Number blocked", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
-        Toast.makeText(ctx, "Set Quiet Dialer as your default phone app to block numbers", Toast.LENGTH_LONG).show()
+        Toast.makeText(ctx, "Set Phone as your default phone app to block numbers", Toast.LENGTH_LONG).show()
     }
 }
 

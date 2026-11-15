@@ -336,7 +336,7 @@ fun DialTab(
                             val sc = 1f - 0.5f * morph
                             scaleX = sc; scaleY = sc
                             translationX = -(screenW.toPx() * 0.28f) * morph
-                            translationY = -(90.dp.toPx()) * morph
+                            translationY = -(84.dp.toPx()) * morph
                         },
                     icon = { DotsGlyph(Color.White) }
                 )
@@ -379,27 +379,29 @@ fun DialTab(
 
 @Composable
 private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
-    val segW = 84.dp
-    val segH = 36.dp
-    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.shadow(4.dp, CircleShape).background(Pal.Raised).padding(4.dp)) {
-            // The green highlight slides between All and Missed.
+    val segW = 68.dp
+    val segH = 30.dp
+    Box(Modifier.fillMaxWidth().padding(top = 0.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.shadow(3.dp, CircleShape).background(Pal.Raised).padding(3.dp)) {
+            // The highlight slides between All and Missed and changes colour: green for All, red for Missed.
             val x by animateDpAsState(
                 targetValue = if (missedOnly) segW else 0.dp,
                 animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
                 label = "filterHighlight"
             )
-            Box(Modifier.offset(x = x).size(width = segW, height = segH).clip(CircleShape).background(Pal.GreenDark))
+            val hl by animateColorAsState(if (missedOnly) Pal.MissedPill else Pal.GreenDark, tween(220), label = "filterHighlightColor")
+            Box(Modifier.offset(x = x).size(width = segW, height = segH).clip(CircleShape).background(hl))
             Row {
                 listOf(false to "All", true to "Missed").forEach { (m, label) ->
                     val on = missedOnly == m
-                    val c by animateColorAsState(if (on) Pal.Green else Pal.Gray, tween(200), label = "filterText")
+                    val target = if (!on) Pal.Gray else if (m) Pal.MissedPillText else Pal.Green
+                    val c by animateColorAsState(target, tween(220), label = "filterText")
                     Box(
                         Modifier.size(width = segW, height = segH)
                             .bounceClick(shape = CircleShape, pressedScale = 0.92f) { onChange(m) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = c, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                        Text(label, color = c, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -429,18 +431,18 @@ private fun Keypad(
             .padding(bottom = 109.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Pal.Handle))
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(6.dp))
         AnimatedVisibility(visible = number.isNotEmpty(), enter = expandVertically(tween(160)) + fadeIn(tween(160)), exit = shrinkVertically(tween(140)) + fadeOut(tween(100))) {
             NumberBar(number, onPaste, onCopy)
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             KEYS.forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     row.forEach { (d, letters) ->
                         Box(
-                            Modifier.weight(1f).height(58.dp)
+                            Modifier.weight(1f).height(46.dp)
                                 .bounceClick(
                                     shape = keyShape, pressedScale = 0.93f,
                                     onLongClick = if (d == "0") ({ onKey("+") }) else null,
@@ -451,30 +453,30 @@ private fun Keypad(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                 Text(
-                                    d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
-                                    color = Pal.Ink, lineHeight = 30.sp
+                                    d, fontSize = if (d == "*" || d == "#") 26.sp else 23.sp,
+                                    color = Pal.Ink, lineHeight = 24.sp
                                 )
                                 if (d == "1") VoicemailGlyph()
                                 else if (letters.isNotEmpty()) Text(
-                                    letters, fontSize = 9.sp, color = Pal.KeyLetters,
-                                    fontWeight = FontWeight.Medium, lineHeight = 10.sp
+                                    letters, fontSize = 8.sp, color = Pal.KeyLetters,
+                                    fontWeight = FontWeight.Medium, lineHeight = 8.sp
                                 )
                             }
                         }
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 // hide keypad
                 Box(
-                    Modifier.weight(1f).height(58.dp)
+                    Modifier.weight(1f).height(46.dp)
                         .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onHide)
                         .background(Pal.Key),
                     contentAlignment = Alignment.Center
                 ) { DotsGlyph(Pal.Ink) }
                 // call: grows out of the green button when the sheet opens
                 Box(
-                    Modifier.weight(1f).height(58.dp).graphicsLayer {
+                    Modifier.weight(1f).height(46.dp).graphicsLayer {
                         val m = morph()
                         scaleX = 0.35f + 0.65f * m
                         scaleY = 0.6f + 0.4f * m
@@ -486,11 +488,11 @@ private fun Keypad(
                             .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onCall)
                             .background(Pal.CallGreen),
                         contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(26.dp)) }
                 }
                 // backspace (long press clears)
                 Box(
-                    Modifier.weight(1f).height(58.dp)
+                    Modifier.weight(1f).height(46.dp)
                         .bounceClick(shape = keyShape, pressedScale = 0.93f, onLongClick = onClear, onClick = onBackspace)
                         .background(Pal.Key),
                     contentAlignment = Alignment.Center
@@ -498,7 +500,7 @@ private fun Keypad(
                     Icon(
                         Icons.AutoMirrored.Filled.Backspace, "Delete digit",
                         tint = Pal.KeyLetters.copy(alpha = if (number.isNotEmpty()) 1f else 0.7f),
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -576,7 +578,7 @@ private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> U
     // Re-check the clipboard whenever the typed number changes.
     val canPaste = remember(number) { cm.hasPrimaryClip() }
     Row(
-        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
@@ -589,7 +591,7 @@ private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> U
             number,
             modifier = Modifier.weight(1f),
             textAlign = TextAlign.Center,
-            fontSize = when { number.length > 18 -> 22.sp; number.length > 12 -> 28.sp; else -> 34.sp },
+            fontSize = when { number.length > 18 -> 22.sp; number.length > 12 -> 28.sp; else -> 30.sp },
             color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
         )
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
