@@ -456,12 +456,7 @@ fun FloatingNav(tab: Int, onTab: (Int) -> Unit, modifier: Modifier = Modifier) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(item.icon, item.label, tint = c, modifier = Modifier.size(26.dp).scale(s))
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        item.label, fontSize = 11.sp, color = c, maxLines = 1,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
-                    )
+                    Icon(item.icon, item.label, tint = c, modifier = Modifier.size(28.dp).scale(s))
                 }
             }
         }

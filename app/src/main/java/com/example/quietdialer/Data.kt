@@ -452,22 +452,7 @@ fun whatsappCall(ctx: Context, number: String, video: Boolean) {
 /** One line in the list shown while typing: a saved contact or a number from the call log. */
 class DialSuggestion(val contact: Contact?, val number: String, val score: Int, val date: Long)
 
-private fun longestCommon(a: String, b: String): Int {
-    var best = 0
-    val prev = IntArray(b.length + 1)
-    for (i in 1..a.length) {
-        var diag = 0
-        for (j in 1..b.length) {
-            val tmp = prev[j]
-            prev[j] = if (a[i - 1] == b[j - 1]) diag + 1 else 0
-            if (prev[j] > best) best = prev[j]
-            diag = tmp
-        }
-    }
-    return best
-}
-
-/** How alike the typed digits and a number are: exact > starts with > ends with > contains > mostly the same. */
+/** How alike the typed digits and a number are: exact > starts with > ends with > contains. Anything else is not a match. */
 private fun dialScore(typed: String, cand: String): Int {
     if (typed.isEmpty() || cand.isEmpty()) return 0
     val ratio = (100 * typed.length / cand.length).coerceAtMost(100)
@@ -477,10 +462,7 @@ private fun dialScore(typed: String, cand: String): Int {
         cand.startsWith(typed) || nat.startsWith(typed) -> 800 + ratio
         cand.endsWith(typed) -> 750 + ratio
         cand.contains(typed) -> 600 + ratio
-        else -> {
-            val l = longestCommon(typed, cand)
-            if (l >= 3 && l * 10 >= typed.length * 6) 300 + 100 * l / typed.length else 0
-        }
+        else -> 0
     }
 }
 
