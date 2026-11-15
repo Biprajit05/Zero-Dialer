@@ -30,6 +30,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalTextInputService
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,8 +51,6 @@ import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -106,6 +110,13 @@ fun DialTab(
     val reload = remember { mutableIntStateOf(0) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    // The dialled number with its cursor / selection. Keys insert at the cursor; the system
+    // long-press menu (Copy / Paste / Select all) works on it. `number` stays the source of truth
+    // for everything else; when it changes from outside (call placed, redial) the cursor goes to the end.
+    var field by remember { mutableStateOf(TextFieldValue(number, TextRange(number.length))) }
+    LaunchedEffect(number) {
+        if (field.text != number) field = TextFieldValue(number, TextRange(number.length))
+    }
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<Long>()) }
     var missedOnly by rememberSaveable { mutableStateOf(false) }
@@ -218,10 +229,32 @@ fun DialTab(
     }
 
     fun key(k: String) {
-        if (number.length >= 32) return
+        val a = field.selection.min.coerceIn(0, field.text.length)
+        val b = field.selection.max.coerceIn(0, field.text.length)
+        if (field.text.length - (b - a) >= 32) return
         dtmf.play(k)
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        onNumber(number + k)
+        val t = field.text.replaceRange(a, b, k)
+        field = TextFieldValue(t, TextRange(a + k.length))
+        onNumber(t)
+    }
+
+    fun backspace() {
+        val a = field.selection.min.coerceIn(0, field.text.length)
+        val b = field.selection.max.coerceIn(0, field.text.length)
+        val (from, to) = if (a != b) a to b else if (a > 0) (a - 1) to a else return
+        val t = field.text.removeRange(from, to)
+        field = TextFieldValue(t, TextRange(from))
+        onNumber(t)
+    }
+
+    // Typing in the field itself (paste / cut from the long-press menu): keep only dial characters.
+    fun fieldChanged(v: TextFieldValue) {
+        fun ok(c: Char) = c.isDigit() || c == '+' || c == '*' || c == '#'
+        val clean = v.text.filter(::ok).take(32)
+        fun idx(i: Int) = v.text.take(i).count(::ok).coerceAtMost(clean.length)
+        field = TextFieldValue(clean, TextRange(idx(v.selection.start), idx(v.selection.end)))
+        if (clean != number) onNumber(clean)
     }
 
     fun call() {
@@ -339,16 +372,12 @@ fun DialTab(
                     modifier = Modifier.onSizeChanged { padPx = it.height },
                     number = number,
                     morph = { morph },
-                    onPaste = { text ->
-                        val clean = text.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
-                        if (clean.isEmpty()) Toast.makeText(ctx, "No number to paste", Toast.LENGTH_SHORT).show()
-                        else onNumber((number + clean).take(32))
-                    },
-                    onCopy = { copyNumber(ctx, number) },
+                    field = field,
+                    onField = { fieldChanged(it) },
                     onKey = { key(it) },
                     onHide = { padVisible = false },
                     onCall = { call() },
-                    onBackspace = { if (number.isNotEmpty()) onNumber(number.dropLast(1)) },
+                    onBackspace = { backspace() },
                     onClear = { onNumber("") }
                 )
             }
@@ -449,8 +478,8 @@ private fun Keypad(
     modifier: Modifier = Modifier,
     number: String,
     morph: () -> Float,
-    onPaste: (String) -> Unit,
-    onCopy: () -> Unit,
+    field: TextFieldValue,
+    onField: (TextFieldValue) -> Unit,
     onKey: (String) -> Unit,
     onHide: () -> Unit,
     onCall: () -> Unit,
@@ -481,9 +510,7 @@ private fun Keypad(
         Spacer(Modifier.height(8.dp))
         Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Pal.Handle))
         Spacer(Modifier.height(6.dp))
-        AnimatedVisibility(visible = number.isNotEmpty(), enter = expandVertically(tween(160)) + fadeIn(tween(160)), exit = shrinkVertically(tween(140)) + fadeOut(tween(100))) {
-            NumberBar(number, onPaste, onCopy)
-        }
+        NumberBar(field, onField)
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             KEYS.forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -617,34 +644,26 @@ private fun RecentRow(
     }
 }
 
-/** The typed number, shown right above the keys, with paste (left) and copy (right). */
+/**
+ * The typed number, shown right above the keys. Tap to place the cursor, long-press for Android's own
+ * Copy / Paste / Select all menu. The system keyboard is switched off here - the keypad is the input.
+ */
 @Composable
-private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> Unit) {
-    val ctx = LocalContext.current
-    val cm = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
-    // Re-check the clipboard whenever the typed number changes.
-    val canPaste = remember(number) { cm.hasPrimaryClip() }
-    Row(
-        Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            if (canPaste) HeaderIcon(plain = true, onClick = {
-                val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
-                onPaste(t)
-            }) { Icon(Icons.Default.ContentPaste, "Paste number", tint = Pal.Gray, modifier = Modifier.size(22.dp)) }
-        }
-        Text(
-            number,
-            modifier = Modifier.weight(1f),
-            textAlign = TextAlign.Center,
-            fontSize = when { number.length > 18 -> 22.sp; number.length > 12 -> 28.sp; else -> 30.sp },
-            color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
-        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            if (number.isNotEmpty()) HeaderIcon(plain = true, onClick = onCopy) {
-                Icon(Icons.Default.ContentCopy, "Copy number", tint = Pal.Gray, modifier = Modifier.size(22.dp))
-            }
+private fun NumberBar(field: TextFieldValue, onField: (TextFieldValue) -> Unit) {
+    val n = field.text.length
+    CompositionLocalProvider(LocalTextInputService provides null) {
+        Box(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+            BasicTextField(
+                value = field,
+                onValueChange = onField,
+                singleLine = true,
+                textStyle = TextStyle(
+                    textAlign = TextAlign.Center, color = Pal.Ink,
+                    fontSize = when { n > 18 -> 22.sp; n > 12 -> 28.sp; else -> 30.sp }
+                ),
+                cursorBrush = SolidColor(Pal.Green),
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
