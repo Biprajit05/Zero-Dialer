@@ -83,6 +83,9 @@ private val KEYS = listOf(
     listOf("*" to "", "0" to "+", "#" to "")
 )
 
+/** Calls from the same number share one row in Recents. */
+private fun groupKey(e: LogEntry): String = numberKey(e.number).ifEmpty { "id${e.id}" }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DialTab(
@@ -113,6 +116,8 @@ fun DialTab(
     var confirmDelete by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+    // Switching between All and Missed always starts from the top of the list.
+    LaunchedEffect(missedOnly) { listState.scrollToItem(0) }
     val collapsed by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 30 }
     }
@@ -192,11 +197,19 @@ fun DialTab(
         HashMap<String, String>().also { m -> contacts.forEach { m.putIfAbsent(numberKey(it.number), it.name) } }
     }
     val all = log
+    // How many missed calls each number has (shown in brackets when more than one).
+    val missedCounts = remember(all) {
+        HashMap<String, Int>().also { m ->
+            all?.forEach { if (it.type == CallLog.Calls.MISSED_TYPE) m.merge(groupKey(it), 1, Int::plus) }
+        }
+    }
+    // One row per number: its latest call (the list is newest first).
     val shown = remember(all, query, missedOnly, nameMap) {
+        val seen = HashSet<String>()
         (all ?: emptyList()).filter { e ->
             (!missedOnly || e.type == CallLog.Calls.MISSED_TYPE) &&
                 (query.isBlank() || nameFor(e, nameMap).contains(query, true) || e.number.contains(query))
-        }
+        }.filter { seen.add(groupKey(it)) }
     }
 
     BackHandler(enabled = selecting || searching) {
@@ -297,6 +310,7 @@ fun DialTab(
                         RecentRow(
                             modifier = Modifier.animateItemPlacement(),
                             e = e,
+                            missedCount = missedCounts[groupKey(e)] ?: 0,
                             title = nm.ifBlank { if (isDialable(e.number)) prettyNumber(e.number) else "Unknown" },
                             showNumber = nm.isNotBlank(),
                             selecting = selecting,
@@ -375,7 +389,12 @@ fun DialTab(
             text = "Are you sure you want to delete ${selected.size} call log?",
             confirmLabel = "Delete",
             onConfirm = {
-                deleteLogEntries(ctx, selected)
+                // A row stands for all calls of that number (only the missed ones on the Missed tab).
+                val keys = shown.filter { it.id in selected }.map { groupKey(it) }.toSet()
+                val ids = (all ?: emptyList()).filter {
+                    groupKey(it) in keys && (!missedOnly || it.type == CallLog.Calls.MISSED_TYPE)
+                }.map { it.id }.toSet()
+                deleteLogEntries(ctx, ids)
                 selecting = false; selected = emptySet(); confirmDelete = false; reload.intValue++
             },
             onDismiss = { confirmDelete = false }
@@ -540,6 +559,7 @@ private fun Keypad(
 private fun RecentRow(
     modifier: Modifier = Modifier,
     e: LogEntry,
+    missedCount: Int = 0,
     title: String,
     showNumber: Boolean,
     selecting: Boolean,
@@ -561,7 +581,6 @@ private fun RecentRow(
         Row(
             Modifier.fillMaxWidth()
                 .bounceClick(shape = shape, pressedScale = 0.98f, onLongClick = onLong, onClick = onClick)
-                .background(if (missed) Pal.MissedBg else Color.Transparent)
                 .padding(start = 8.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -570,7 +589,7 @@ private fun RecentRow(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    title, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    if (missed && missedCount > 1) "$title ($missedCount)" else title, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (missed) Pal.Missed else Pal.Ink
                 )
                 Spacer(Modifier.height(4.dp))
