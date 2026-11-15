@@ -127,6 +127,7 @@ fun DialTab(
     var menuOpen by remember { mutableStateOf(false) }
     var themeOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var fakeOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -333,6 +334,10 @@ fun DialTab(
                             onClick = { menuOpen = false; onOpenCallBg() }
                         )
                         DropdownMenuItem(
+                            text = { Text("Fake call", color = Pal.Ink) },
+                            onClick = { menuOpen = false; fakeOpen = true }
+                        )
+                        DropdownMenuItem(
                             text = { Text("Theme", color = Pal.Ink) },
                             onClick = { menuOpen = false; themeOpen = true }
                         )
@@ -500,6 +505,8 @@ fun DialTab(
         // ---------- delete bar (selection mode) ----------
         if (selecting) DeleteBar(enabled = selected.isNotEmpty()) { confirmDelete = true }
     }
+
+    if (fakeOpen) FakeCallDialog { fakeOpen = false }
 
     if (themeOpen) {
         ThemeDialog(

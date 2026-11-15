@@ -89,8 +89,8 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
     val scope = rememberCoroutineScope()
     val answer by rememberUpdatedState(onAnswer)
     val decline by rememberUpdatedState(onDecline)
-    val needPx = with(density) { 90.dp.toPx() }
-    val maxPx = with(density) { 140.dp.toPx() }
+    val needPx = with(density) { 64.dp.toPx() }
+    val maxPx = with(density) { 100.dp.toPx() }
 
     var dragY by remember { mutableFloatStateOf(0f) }
     var leave by remember { mutableFloatStateOf(0f) }
@@ -159,7 +159,7 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
     }
 
     Box(
-        modifier.fillMaxWidth().height(360.dp).pointerInput(Unit) {
+        modifier.fillMaxWidth().height(260.dp).pointerInput(Unit) {
             detectVerticalDragGestures(
                 onDragStart = { },
                 onVerticalDrag = { change, dy ->
@@ -175,9 +175,9 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val c = Offset(size.width / 2f, size.height / 2f)
-            val circleR = 75.dp.toPx()
-            val arcR = 158.dp.toPx()
-            val drift = ((arcPulse - 0.55f) / 0.45f) * 8.dp.toPx()
+            val circleR = 52.dp.toPx()
+            val arcR = 112.dp.toPx()
+            val drift = ((arcPulse - 0.55f) / 0.45f) * 6.dp.toPx()
             val idle = 1f - progress
 
             fun arc(startDeg: Float, color: Color, alpha: Float, dy: Float, width: Float) {
@@ -199,8 +199,8 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
             val fade = 1f - leave
             val greenA = (arcPulse + (1f - arcPulse) * upP) * (1f - downP) * fade
             val redA = (arcPulse + (1f - arcPulse) * downP) * (1f - upP) * fade
-            arc(-124f, ArcGreen, greenA, -drift * idle, (9f + 4f * upP).dp.toPx())
-            arc(56f, ArcRed, redA, drift * idle, (9f + 4f * downP).dp.toPx())
+            arc(-124f, ArcGreen, greenA, -drift * idle, (7f + 3f * upP).dp.toPx())
+            arc(56f, ArcRed, redA, drift * idle, (7f + 3f * downP).dp.toPx())
 
             // two ripples spreading out of the circle, half a cycle apart
             if (!busy) {
@@ -226,7 +226,7 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
                     scaleY = s
                     alpha = 1f - leave
                 }
-                .size(150.dp)
+                .size(104.dp)
                 .glass(CircleShape, 0.04f),
             contentAlignment = Alignment.Center
         ) {
@@ -234,7 +234,7 @@ fun SwipeAnswerControl(onAnswer: () -> Unit, onDecline: () -> Unit, modifier: Mo
                 if (downP > 0.4f) Icons.Default.CallEnd else Icons.Default.Call,
                 contentDescription = if (downP > 0.4f) "Decline" else "Answer",
                 tint = Color.White,
-                modifier = Modifier.size(60.dp).graphicsLayer { rotationZ = if (progress < 0.05f) wiggle else 0f }
+                modifier = Modifier.size(42.dp).graphicsLayer { rotationZ = if (progress < 0.05f) wiggle else 0f }
             )
         }
 

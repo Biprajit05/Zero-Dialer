@@ -395,7 +395,7 @@ private fun ParticipantsCard(people: List<Participant>, onEnd: (Call) -> Unit) {
 }
 
 @Composable
-private fun GlassPill(text: String, icon: ImageVector?, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
+internal fun GlassPill(text: String, icon: ImageVector?, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val shape = RoundedCornerShape(50)
     Row(
         modifier.alpha(if (enabled) 1f else 0.45f).height(52.dp)
