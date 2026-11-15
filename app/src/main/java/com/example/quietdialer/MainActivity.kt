@@ -203,7 +203,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     }
                 }
                 // Floating nav pill (the green action button of each tab sits to its right).
-                AnimatedVisibility(
+                androidx.compose.animation.AnimatedVisibility(
                     visible = !barHidden && !imeOpen,
                     modifier = Modifier.align(Alignment.BottomStart),
                     enter = slideInVertically(tween(280)) { it } + fadeIn(tween(220)),
