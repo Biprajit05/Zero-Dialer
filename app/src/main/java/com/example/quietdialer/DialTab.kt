@@ -28,6 +28,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -65,6 +66,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -124,6 +126,16 @@ fun DialTab(
                     padVisible = false
                     DialUiState.filterRevealed = true
                 }
+                return Offset.Zero
+            }
+        }
+    }
+
+    // Scrolling the suggestions list (while a number is typed) also closes the keypad.
+    val padCloseWatcher = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y != 0f) padVisible = false
                 return Offset.Zero
             }
         }
@@ -265,7 +277,8 @@ fun DialTab(
             when {
                 number.isNotEmpty() && !selecting -> Box(Modifier.fillMaxSize().padding(bottom = padSpace)) {
                     Suggestions(
-                        number = number, contacts = contacts, showNumber = !padVisible,
+                        number = number, contacts = contacts, log = all ?: emptyList(), showNumber = !padVisible,
+                        onOpenPad = { padVisible = true }, closePad = padCloseWatcher,
                         onNewContact = onNewContact
                     ) { placeCall(ctx, it); onNumber("") }
                 }
@@ -428,6 +441,19 @@ private fun Keypad(
     val keyShape = RoundedCornerShape(50)
     Column(
         modifier.fillMaxWidth()
+            // swipe the sheet down to close it
+            .pointerInput(Unit) {
+                var total = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { total = 0f },
+                    onDragEnd = { total = 0f },
+                    onDragCancel = { total = 0f },
+                    onVerticalDrag = { change, dy ->
+                        total += dy
+                        if (total > 70f) { total = Float.NEGATIVE_INFINITY; change.consume(); onHide() }
+                    }
+                )
+            }
             .background(Pal.PadBg, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             // the nav pill floats over this bottom part
             .padding(bottom = 109.dp),
@@ -605,53 +631,66 @@ private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> U
 }
 
 /**
- * Shown instead of recents while a number is being typed. For a number that isn't saved yet it
- * lists New contact / Add to existing contact / Send message / Video call, then matching contacts.
+ * Shown instead of recents while a number is being typed: contacts and recent numbers that look like it
+ * (most similar first), then - only when the number isn't a saved contact - New contact / Add to existing
+ * contact / Send message / Video call.
  */
 @Composable
 private fun Suggestions(
     number: String,
     contacts: List<Contact>,
+    log: List<LogEntry>,
     showNumber: Boolean,
+    onOpenPad: () -> Unit,
+    closePad: NestedScrollConnection,
     onNewContact: (String) -> Unit,
     onCall: (String) -> Unit
 ) {
     val ctx = LocalContext.current
-    val matches = remember(number, contacts) { contacts.filter { matchesDial(it, number) }.take(40) }
+    val matches = remember(number, contacts, log) { dialSuggestions(number, contacts, log) }
     val key = numberKey(number)
     val saved = remember(number, contacts) { key.isNotEmpty() && contacts.any { numberKey(it.number) == key } }
     Column(Modifier.fillMaxSize()) {
         if (showNumber) {
-            // Keypad is hidden, so show the number here instead.
+            // Keypad is hidden: the typed number sits in the middle; tap it to bring the keypad back.
             Text(
-                number, fontSize = if (number.length > 14) 24.sp else 32.sp, color = Pal.Ink,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                number, fontSize = if (number.length > 14) 26.sp else 34.sp, color = Pal.Ink,
+                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth()
+                    .bounceClick(shape = RoundedCornerShape(12.dp), pressedScale = 0.98f, ripple = false, onClick = onOpenPad)
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
             )
             HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
         }
-        LazyColumn(Modifier.fillMaxSize()) {
-            if (!saved) {
+        LazyColumn(Modifier.fillMaxSize().nestedScroll(closePad)) {
+            items(matches, key = { "${it.contact?.id ?: 0}:${numberKey(it.number)}" }) { m ->
+                val c = m.contact
+                Row(
+                    Modifier.fillMaxWidth().clickable { onCall(m.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (c != null) Avatar(c.name, 44.dp, c.id) else Avatar("", 44.dp, 0L, person = true)
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            c?.name ?: prettyNumber(m.number), fontSize = 17.sp, color = Pal.Ink,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            if (c != null) prettyNumber(m.number) else "Recent call",
+                            fontSize = 13.sp, color = Pal.Gray
+                        )
+                    }
+                }
+            }
+            if (!saved && isDialable(number)) {
                 item {
                     Column {
+                        if (matches.isNotEmpty()) HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
                         OptionRow("New contact") { onNewContact(number) }
                         OptionRow("Add to existing contact") { addToExistingIntent(ctx, number) }
                         OptionRow("Send message") { sendSms(ctx, number) }
                         OptionRow("Video call") { placeVideoCall(ctx, number) }
-                        if (matches.isNotEmpty()) HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
-                    }
-                }
-            }
-            items(matches, key = { "${it.id}:${numberKey(it.number)}" }) { c ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { onCall(c.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Avatar(c.name, 44.dp, c.id)
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(c.name, fontSize = 17.sp, color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(prettyNumber(c.number), fontSize = 13.sp, color = Pal.Gray)
                     }
                 }
             }

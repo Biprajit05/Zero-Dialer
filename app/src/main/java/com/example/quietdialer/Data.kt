@@ -446,3 +446,67 @@ fun whatsappCall(ctx: Context, number: String, video: Boolean) {
         Toast.makeText(ctx, "Couldn't start the WhatsApp call", Toast.LENGTH_SHORT).show()
     }
 }
+
+// ---------------------------------------------------------------- dial suggestions
+
+/** One line in the list shown while typing: a saved contact or a number from the call log. */
+class DialSuggestion(val contact: Contact?, val number: String, val score: Int, val date: Long)
+
+private fun longestCommon(a: String, b: String): Int {
+    var best = 0
+    val prev = IntArray(b.length + 1)
+    for (i in 1..a.length) {
+        var diag = 0
+        for (j in 1..b.length) {
+            val tmp = prev[j]
+            prev[j] = if (a[i - 1] == b[j - 1]) diag + 1 else 0
+            if (prev[j] > best) best = prev[j]
+            diag = tmp
+        }
+    }
+    return best
+}
+
+/** How alike the typed digits and a number are: exact > starts with > ends with > contains > mostly the same. */
+private fun dialScore(typed: String, cand: String): Int {
+    if (typed.isEmpty() || cand.isEmpty()) return 0
+    val ratio = (100 * typed.length / cand.length).coerceAtMost(100)
+    val nat = cand.takeLast(10)
+    return when {
+        cand == typed || (typed.length >= 10 && nat == typed.takeLast(10)) -> 1000
+        cand.startsWith(typed) || nat.startsWith(typed) -> 800 + ratio
+        cand.endsWith(typed) -> 750 + ratio
+        cand.contains(typed) -> 600 + ratio
+        else -> {
+            val l = longestCommon(typed, cand)
+            if (l >= 3 && l * 10 >= typed.length * 6) 300 + 100 * l / typed.length else 0
+        }
+    }
+}
+
+/** Contacts and call-log numbers that look like what was typed, most similar first. */
+fun dialSuggestions(typed: String, contacts: List<Contact>, log: List<LogEntry>): List<DialSuggestion> {
+    if (typed.any { it == '*' || it == '#' }) return emptyList()
+    val d = digitsOf(typed)
+    if (d.isEmpty()) return emptyList()
+    val out = ArrayList<DialSuggestion>()
+    val seen = HashSet<String>()
+    for (c in contacts) {
+        if (!seen.add("${c.id}:${numberKey(c.number)}")) continue
+        var s = dialScore(d, digitsOf(c.number))
+        if (typed.all { it.isDigit() } &&
+            (t9(c.name).startsWith(typed) || c.name.split(' ').any { t9(it).startsWith(typed) })
+        ) s = maxOf(s, 700)
+        if (s > 0) out.add(DialSuggestion(c, c.number, s, 0L))
+    }
+    val saved = contacts.map { numberKey(it.number) }.toHashSet()
+    val loggedSeen = HashSet<String>()
+    for (e in log) {                       // newest first
+        val k = numberKey(e.number)
+        if (k.isEmpty() || k in saved || !loggedSeen.add(k)) continue
+        val s = dialScore(d, digitsOf(e.number))
+        if (s > 0) out.add(DialSuggestion(null, e.number, s, e.date))
+    }
+    return out.sortedWith(compareByDescending<DialSuggestion> { it.score }.thenByDescending { it.date }.thenBy { it.contact?.name ?: "" })
+        .take(40)
+}
