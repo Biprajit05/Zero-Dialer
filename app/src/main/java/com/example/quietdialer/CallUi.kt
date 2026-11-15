@@ -1,6 +1,9 @@
 package com.example.quietdialer
 
 import android.telecom.Call
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,7 +54,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -177,7 +179,8 @@ private fun IncomingContent(c: CallSnap, onAnswer: () -> Unit, onDecline: () -> 
             } else {
                 Text(
                     c.title, style = Glow, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
+                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    lineHeight = 54.sp
                 )
             }
             Text("Incoming call...", color = Color.White.copy(alpha = 0.8f), fontSize = 24.sp, modifier = Modifier.padding(top = 6.dp))
@@ -232,7 +235,6 @@ private fun OngoingContent(
 ) {
     val enter by rememberEntrance(0, 450)
     var showPad by remember { mutableStateOf(false) }
-    var typed by remember { mutableStateOf("") }
 
     val onHoldNow = c.state == Call.STATE_HOLDING
     val fitTitle = c.name.isNullOrBlank() && !c.isConference
@@ -251,12 +253,6 @@ private fun OngoingContent(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         when {
-            showPad -> {
-                Spacer(Modifier.height(24.dp))
-                CallHeader(c.title, label, timer, c.hd, recording, big = false, fit = fitTitle)
-                Spacer(Modifier.height(8.dp))
-                Text(typed, color = Color.White, fontSize = 28.sp, maxLines = 1)
-            }
             other != null -> {
                 Spacer(Modifier.height(28.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -293,19 +289,12 @@ private fun OngoingContent(
 
         Spacer(Modifier.weight(1f))
 
-        if (showPad) {
-            InCallKeypad(
-                onKey = { ch, down -> if (down) typed += ch; onDtmf(ch, down) },
-                onHide = { showPad = false },
-                onEnd = onEnd
-            )
-        } else {
-            ControlGrid(
-                live, onHoldNow, c.canHold, muted, speaker, recording,
-                onVideo, onAddCall, onMessages, onMute, onHold, onRecord, onSpeaker,
-                onShowPad = { showPad = true }, onEnd = onEnd
-            )
-        }
+        ControlGrid(
+            live, onHoldNow, c.canHold, muted, speaker, recording, showPad,
+            onVideo, onAddCall, onMessages, onMute, onHold, onRecord, onSpeaker,
+            onTogglePad = { showPad = !showPad }, onEnd = onEnd,
+            onKey = onDtmf
+        )
         Spacer(Modifier.height(32.dp))
     }
 }
@@ -318,7 +307,8 @@ private fun CallHeader(title: String, label: String, timer: String?, hd: Boolean
         } else {
             Text(
                 title, style = Glow, color = Color.White, fontSize = if (big) 40.sp else 28.sp, fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                lineHeight = if (big) 46.sp else 33.sp
             )
         }
         if (label.isNotEmpty()) {
@@ -424,6 +414,15 @@ internal fun GlassPill(text: String, icon: ImageVector?, enabled: Boolean, modif
 
 // ---------------------------------------------------------------- buttons
 
+private val KEY_SIZE = 72.dp
+private val KEY_GAP = 14.dp
+private val PAD_AREA = KEY_SIZE * 4 + KEY_GAP * 3
+
+/**
+ * The button area. The six round buttons and the keypad share one spot and cross-fade with a
+ * small slide; the bottom row (speaker, end, keypad) never moves. The keypad button shows as
+ * pressed while the keypad is open and tapping it again closes the keypad.
+ */
 @Composable
 private fun ControlGrid(
     live: Boolean,
@@ -432,6 +431,7 @@ private fun ControlGrid(
     muted: Boolean,
     speaker: Boolean,
     recording: Boolean,
+    showPad: Boolean,
     onVideo: () -> Unit,
     onAddCall: () -> Unit,
     onMessages: () -> Unit,
@@ -439,24 +439,51 @@ private fun ControlGrid(
     onHold: () -> Unit,
     onRecord: () -> Unit,
     onSpeaker: () -> Unit,
-    onShowPad: () -> Unit,
-    onEnd: () -> Unit
+    onTogglePad: () -> Unit,
+    onEnd: () -> Unit,
+    onKey: (Char, Boolean) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            RoundAction("Video call", Icons.Default.Videocam, onVideo, enabled = live)
-            RoundAction("Add call", Icons.Default.Add, onAddCall, enabled = live)
-            RoundAction("Messages", Icons.Default.ChatBubble, onMessages)
+    val p by animateFloatAsState(
+        targetValue = if (showPad) 1f else 0f,
+        animationSpec = tween(320, easing = FastOutSlowInEasing),
+        label = "keypad"
+    )
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(PAD_AREA), contentAlignment = Alignment.BottomCenter) {
+            if (p < 0.99f) {
+                Column(
+                    Modifier.fillMaxWidth().graphicsLayer {
+                        alpha = (1f - p * 1.4f).coerceIn(0f, 1f)
+                        translationY = 36.dp.toPx() * p
+                    },
+                    verticalArrangement = Arrangement.spacedBy(22.dp)
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        RoundAction("Video call", Icons.Default.Videocam, onVideo, enabled = live)
+                        RoundAction("Add call", Icons.Default.Add, onAddCall, enabled = live)
+                        RoundAction("Messages", Icons.Default.ChatBubble, onMessages)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        RoundAction("Mute", if (muted) Icons.Default.MicOff else Icons.Default.Mic, onMute, active = muted)
+                        RoundAction("Hold", Icons.Default.Pause, onHold, active = onHoldNow, enabled = live && canHold)
+                        RoundAction(if (recording) "Stop" else "Record", Icons.Default.GraphicEq, onRecord, active = recording, enabled = live)
+                    }
+                }
+            }
+            if (p > 0.01f) {
+                Box(
+                    Modifier.fillMaxWidth().graphicsLayer {
+                        alpha = ((p - 0.15f) / 0.85f).coerceIn(0f, 1f)
+                        translationY = 48.dp.toPx() * (1f - p)
+                    }
+                ) { InCallKeypad(onKey) }
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            RoundAction("Mute", if (muted) Icons.Default.MicOff else Icons.Default.Mic, onMute, active = muted)
-            RoundAction("Hold", Icons.Default.Pause, onHold, active = onHoldNow, enabled = live && canHold)
-            RoundAction(if (recording) "Stop" else "Record", Icons.Default.GraphicEq, onRecord, active = recording, enabled = live)
-        }
+        Spacer(Modifier.height(22.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Top) {
             RoundAction("Speaker", Icons.Default.VolumeUp, onSpeaker, active = speaker)
             EndButton(onEnd)
-            RoundAction("Keypad", Icons.Default.Dialpad, onShowPad, enabled = live)
+            RoundAction("Keypad", Icons.Default.Dialpad, onTogglePad, active = showPad, enabled = live)
         }
     }
 }
@@ -482,13 +509,12 @@ private fun RoundAction(
     }
 }
 
-/** The big red end button with a soft dark ring around it. */
+/** The big red end button. */
 @Composable
 private fun EndButton(onEnd: () -> Unit) {
     Column(Modifier.width(92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier.offset(y = (-2).dp).size(76.dp)
-                .drawBehind { drawCircle(Color.Black.copy(alpha = 0.18f), radius = size.minDimension / 2f + 10.dp.toPx()) }
                 .bounceClick(shape = CircleShape, pressedScale = 0.9f, onClick = onEnd)
                 .background(Brush.verticalGradient(listOf(Color(0xFFF0505A), Color(0xFFC62828)))),
             contentAlignment = Alignment.Center
@@ -497,13 +523,13 @@ private fun EndButton(onEnd: () -> Unit) {
 }
 
 @Composable
-private fun InCallKeypad(onKey: (Char, Boolean) -> Unit, onHide: () -> Unit, onEnd: () -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+private fun InCallKeypad(onKey: (Char, Boolean) -> Unit) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(KEY_GAP)) {
         listOf("123", "456", "789", "*0#").forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 row.forEach { ch ->
                     Box(
-                        Modifier.size(72.dp).glass(CircleShape)
+                        Modifier.size(KEY_SIZE).glass(CircleShape)
                             .pointerInput(ch) {
                                 detectTapGestures(onPress = {
                                     onKey(ch, true)
@@ -515,21 +541,6 @@ private fun InCallKeypad(onKey: (Char, Boolean) -> Unit, onHide: () -> Unit, onE
                     ) { Text(ch.toString(), color = Color.White, fontSize = 28.sp) }
                 }
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(Modifier.width(92.dp), contentAlignment = Alignment.Center) {
-                TextButton(onClick = onHide) { Text("Hide", color = Color.White, fontSize = 16.sp) }
-            }
-            Box(
-                Modifier.size(72.dp).bounceClick(shape = CircleShape, pressedScale = 0.88f, onClick = onEnd)
-                    .background(Brush.verticalGradient(listOf(Color(0xFFF0505A), Color(0xFFC62828)))),
-                contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.CallEnd, "End", tint = Color.White, modifier = Modifier.size(30.dp)) }
-            Spacer(Modifier.width(92.dp))
         }
     }
 }

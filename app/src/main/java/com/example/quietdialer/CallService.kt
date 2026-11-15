@@ -144,7 +144,7 @@ class CallService : InCallService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         val b = NotificationCompat.Builder(this, if (ringing) CH_INCOMING else CH_ONGOING)
-            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setSmallIcon(R.drawable.ic_stat_call)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setOngoing(true)            // cannot be swiped away
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
