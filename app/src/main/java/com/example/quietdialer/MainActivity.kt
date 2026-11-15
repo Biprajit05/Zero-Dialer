@@ -12,6 +12,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -209,9 +211,15 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     enter = slideInVertically(tween(280)) { it } + fadeIn(tween(220)),
                     exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150))
                 ) {
+                    // On the Dial tab with the keypad open the bar glides to the centre of the screen
+                    // (the green dots button has turned into the call button); otherwise it sits left.
+                    val centred = tab == 0 && DialUiState.padOpen
+                    val navSpec = tween<androidx.compose.ui.unit.Dp>(if (centred) 300 else 240, easing = FastOutSlowInEasing)
+                    val navStart by animateDpAsState(if (centred) 64.dp else 16.dp, navSpec, label = "navStart")
+                    val navEnd by animateDpAsState(if (centred) 64.dp else 90.dp, navSpec, label = "navEnd")
                     FloatingNav(
                         tab = tab, onTab = { tab = it },
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 90.dp, bottom = 14.dp)
+                        modifier = Modifier.fillMaxWidth().padding(start = navStart, end = navEnd, bottom = 14.dp)
                     )
                 }
             }

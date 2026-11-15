@@ -452,7 +452,7 @@ fun FloatingNav(tab: Int, onTab: (Int) -> Unit, modifier: Modifier = Modifier) {
                 )
                 Column(
                     Modifier.weight(1f).fillMaxHeight()
-                        .bounceClick(shape = RoundedCornerShape(28.dp), pressedScale = 0.9f) { onTab(i) },
+                        .bounceClick(shape = RoundedCornerShape(28.dp), pressedScale = 0.9f, ripple = false) { onTab(i) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {

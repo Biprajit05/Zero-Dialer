@@ -38,6 +38,9 @@ object ThemeSettings {
 object DialUiState {
     /** The All / Missed switch: appears on the first scroll and then stays. */
     var filterRevealed by mutableStateOf(false)
+
+    /** True while the Dial tab's keypad sheet is open (the bottom bar centres itself then). */
+    var padOpen by mutableStateOf(false)
 }
 
 @Composable

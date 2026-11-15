@@ -149,6 +149,8 @@ fun DialTab(
     )
     val screenW = LocalConfiguration.current.screenWidthDp.dp
 
+    SideEffect { DialUiState.padOpen = padShown }
+
     val canRead = remember(permsVersion) { hasPerm(ctx, Manifest.permission.READ_CALL_LOG) }
 
     LaunchedEffect(selecting) { onBarHidden(selecting) }
@@ -398,7 +400,7 @@ private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
                     val c by animateColorAsState(target, tween(220), label = "filterText")
                     Box(
                         Modifier.size(width = segW, height = segH)
-                            .bounceClick(shape = CircleShape, pressedScale = 0.92f) { onChange(m) },
+                            .bounceClick(shape = CircleShape, pressedScale = 0.92f, ripple = false) { onChange(m) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(label, color = c, fontSize = 13.sp, fontWeight = FontWeight.Medium)

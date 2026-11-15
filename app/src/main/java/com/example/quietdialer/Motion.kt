@@ -37,6 +37,7 @@ fun Modifier.bounceClick(
     pressedScale: Float = 0.92f,
     elevation: Dp = 0.dp,
     enabled: Boolean = true,
+    ripple: Boolean = true,
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ): Modifier = composed {
@@ -56,7 +57,7 @@ fun Modifier.bounceClick(
         .clip(shape)
         .combinedClickable(
             interactionSource = source,
-            indication = LocalIndication.current,
+            indication = if (ripple) LocalIndication.current else null,
             enabled = enabled,
             onLongClick = onLongClick,
             onClick = onClick
