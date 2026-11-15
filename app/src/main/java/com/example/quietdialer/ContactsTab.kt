@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,7 +39,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.shape.CircleShape
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private sealed interface ListRow {
     data class Head(val letter: Char) : ListRow
@@ -72,6 +79,10 @@ fun ContactsTab(
     LaunchedEffect(selecting) { onBarHidden(selecting) }
     DisposableEffect(Unit) { onDispose { onBarHidden(false) } }
     BackHandler(enabled = selecting) { selecting = false; selected = emptySet() }
+
+    val googleIds by produceState(emptySet<Long>(), permsVersion, contacts) {
+        value = if (canRead) withContext(Dispatchers.IO) { loadGoogleContactIds(ctx) } else emptySet()
+    }
 
     val total = remember(contacts) { contacts.distinctBy { it.id }.size }
     val people = remember(contacts, query) {
@@ -137,7 +148,7 @@ fun ContactsTab(
                     }
                 }
             }
-            SearchPill(query, { query = it }, "$total contacts")
+            SearchPill(query, { query = it }, "$total Contacts")
         }
 
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -149,11 +160,11 @@ fun ContactsTab(
                 )
                 else -> LazyColumn(
                     state = listState, modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(top = 6.dp, bottom = 96.dp)
+                    contentPadding = PaddingValues(top = 6.dp, bottom = 120.dp)
                 ) {
                     if (showLead) {
                         item(key = "profile") {
-                            LeadRow("Profile") {
+                            LeadRow("Profile", Icons.Default.Person) {
                                 try {
                                     ctx.startActivity(Intent(Intent.ACTION_VIEW, ContactsContract.Profile.CONTENT_URI))
                                 } catch (e: Exception) {
@@ -162,7 +173,7 @@ fun ContactsTab(
                             }
                         }
                         item(key = "groups") {
-                            LeadRow("Groups") {
+                            LeadRow("Groups", Icons.Default.People) {
                                 try {
                                     ctx.startActivity(Intent(Intent.ACTION_VIEW, ContactsContract.Groups.CONTENT_URI))
                                 } catch (e: Exception) {
@@ -176,33 +187,35 @@ fun ContactsTab(
                         key = { r -> when (r) { is ListRow.Head -> "h${r.letter}"; is ListRow.Item -> "c${r.c.id}" } }
                     ) { r ->
                         when (r) {
-                            is ListRow.Head -> Box(Modifier.fillMaxWidth().padding(start = 16.dp, top = 14.dp, bottom = 6.dp)) {
-                                SectionBadge(r.letter)
-                            }
+                            is ListRow.Head -> Box(
+                                Modifier.fillMaxWidth().animateItemPlacement().padding(start = 18.dp, top = 14.dp, bottom = 6.dp)
+                            ) { SectionBadge(r.letter) }
                             is ListRow.Item -> {
                                 val c = r.c
-                                Column {
+                                Column(Modifier.animateItemPlacement()) {
                                     Row(
-                                        Modifier.fillMaxWidth()
-                                            .combinedClickable(
+                                        Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                            .bounceClick(
+                                                shape = RoundedCornerShape(16.dp), pressedScale = 0.98f,
+                                                onLongClick = { if (!selecting) { selecting = true; selected = setOf(c.id) } },
                                                 onClick = {
                                                     if (selecting) selected = if (c.id in selected) selected - c.id else selected + c.id
                                                     else onOpenContact(c)
-                                                },
-                                                onLongClick = { if (!selecting) { selecting = true; selected = setOf(c.id) } }
+                                                }
                                             )
-                                            .padding(start = 16.dp, end = 30.dp, top = 6.dp, bottom = 6.dp),
+                                            .padding(start = 10.dp, end = 34.dp, top = 6.dp, bottom = 6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         if (selecting) { SelectCircle(c.id in selected); Spacer(Modifier.width(12.dp)) }
-                                        Avatar(c.name, 40.dp, c.id)
-                                        Spacer(Modifier.width(14.dp))
+                                        Avatar(c.name, 44.dp, c.id)
+                                        Spacer(Modifier.width(16.dp))
                                         Text(
-                                            c.name, fontSize = 16.sp, color = Pal.Ink, maxLines = 1,
+                                            c.name, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Pal.Ink, maxLines = 1,
                                             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
                                         )
+                                        if (c.id in googleIds) GoogleBadge()
                                     }
-                                    HorizontalDivider(Modifier.padding(start = 70.dp, end = 30.dp), color = Pal.Divider, thickness = 0.5.dp)
+                                    HorizontalDivider(Modifier.padding(start = 78.dp, end = 34.dp), color = Pal.Divider, thickness = 0.5.dp)
                                 }
                             }
                         }
@@ -210,16 +223,17 @@ fun ContactsTab(
                 }
             }
 
-            // A-Z index on the right edge: tap or drag to jump.
-            if (canRead && letters.size > 1 && query.isBlank()) {
+            // A-Z index on the right edge: tap or drag to jump (letters with no contacts jump to the next one).
+            if (canRead && letters.isNotEmpty() && query.isBlank()) {
                 var h by remember { mutableIntStateOf(1) }
                 fun jump(y: Float) {
-                    val i = ((y / h) * letters.size).toInt().coerceIn(0, letters.lastIndex)
-                    val target = (headIndex[letters[i]] ?: 0) + lead
-                    scope.launch { listState.scrollToItem(target) }
+                    val i = ((y / h) * INDEX.size).toInt().coerceIn(0, INDEX.lastIndex)
+                    val target = INDEX.drop(i).firstOrNull { it in letters } ?: letters.last()
+                    val at = (headIndex[target] ?: 0) + lead
+                    scope.launch { listState.scrollToItem(at) }
                 }
                 Column(
-                    Modifier.align(Alignment.CenterEnd).padding(end = 2.dp).width(24.dp).fillMaxHeight(0.7f)
+                    Modifier.align(Alignment.CenterEnd).padding(end = 2.dp).width(26.dp).fillMaxHeight(0.78f)
                         .onSizeChanged { h = it.height.coerceAtLeast(1) }
                         .pointerInput(letters, lead) { detectTapGestures(onTap = { jump(it.y) }) }
                         .pointerInput(letters, lead) {
@@ -228,16 +242,18 @@ fun ContactsTab(
                                 onVerticalDrag = { change, _ -> jump(change.position.y) }
                             )
                         },
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceEvenly
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    letters.forEach { l ->
-                        Box(
-                            Modifier.size(16.dp).clip(RoundedCornerShape(4.dp))
-                                .background(if (l == currentLetter) Pal.Chip else androidx.compose.ui.graphics.Color.Transparent),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(l.toString(), fontSize = 9.sp, color = if (l == currentLetter) Pal.Ink else Pal.Gray)
+                    INDEX.forEach { l ->
+                        val on = l == currentLetter
+                        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier.size(width = 20.dp, height = 16.dp).clip(RoundedCornerShape(5.dp))
+                                    .background(if (on) Pal.Chip else androidx.compose.ui.graphics.Color.Transparent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(l.toString(), fontSize = 10.sp, color = if (on) Pal.Ink else Pal.Gray)
+                            }
                         }
                     }
                 }
@@ -245,8 +261,8 @@ fun ContactsTab(
 
             androidx.compose.animation.AnimatedVisibility(
                 visible = !selecting,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-                enter = fadeIn(tween(200)) + scaleIn(tween(200)),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 17.dp),
+                enter = fadeIn(tween(200)) + scaleIn(tween(250)),
                 exit = fadeOut(tween(120)) + scaleOut(tween(120))
             ) { GreenFab(onNewContact) }
         }
@@ -267,18 +283,31 @@ fun ContactsTab(
     }
 }
 
+private val INDEX: List<Char> = listOf('#') + ('A'..'Z')
+
+/** Small grey "G" tag shown for contacts that live in a Google account. */
 @Composable
-private fun LeadRow(title: String, onClick: () -> Unit) {
+private fun GoogleBadge() {
+    Box(
+        Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(Pal.Chip),
+        contentAlignment = Alignment.Center
+    ) { Text("G", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Pal.Gray) }
+}
+
+@Composable
+private fun LeadRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Column {
         Row(
-            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 16.dp, end = 30.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                .bounceClick(shape = RoundedCornerShape(16.dp), pressedScale = 0.98f, onClick = onClick)
+                .padding(start = 10.dp, end = 34.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Avatar(title, 40.dp, person = true)
-            Spacer(Modifier.width(14.dp))
-            Text(title, fontSize = 16.sp, color = Pal.Ink, modifier = Modifier.weight(1f))
-            Icon(Icons.Default.KeyboardArrowRight, null, tint = Pal.Gray, modifier = Modifier.size(20.dp))
+            Avatar(title, 44.dp, icon = icon)
+            Spacer(Modifier.width(16.dp))
+            Text(title, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Pal.Ink, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.KeyboardArrowRight, null, tint = Pal.Gray, modifier = Modifier.size(24.dp))
         }
-        HorizontalDivider(Modifier.padding(start = 70.dp, end = 30.dp), color = Pal.Divider, thickness = 0.5.dp)
+        HorizontalDivider(Modifier.padding(start = 78.dp, end = 34.dp), color = Pal.Divider, thickness = 0.5.dp)
     }
 }

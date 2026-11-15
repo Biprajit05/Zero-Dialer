@@ -9,6 +9,10 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -46,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -186,7 +191,7 @@ fun DialTab(
                 onCancel = { selecting = false; selected = emptySet() }
             )
         } else {
-            CollapsingHeader("Dial", collapsed) {
+            CollapsingHeader("Recents", collapsed) {
                 HeaderIcon(onClick = { selecting = true; searching = false; query = "" }) { SelectIcon() }
                 HeaderIcon(onClick = { searching = !searching; if (!searching) query = "" }) {
                     Icon(Icons.Outlined.Search, "Search", tint = Pal.Ink, modifier = Modifier.size(24.dp))
@@ -243,6 +248,7 @@ fun DialTab(
                     items(shown, key = { it.id }) { e ->
                         val nm = nameFor(e, nameMap)
                         RecentRow(
+                            modifier = Modifier.animateItemPlacement(),
                             e = e,
                             title = nm.ifBlank { if (isDialable(e.number)) prettyNumber(e.number) else "Unknown" },
                             showNumber = nm.isNotBlank(),
@@ -258,22 +264,18 @@ fun DialTab(
                             onInfo = { onOpenInfo(e.number) }
                         )
                     }
-                    item { Spacer(Modifier.height(80.dp)) }
+                    item { Spacer(Modifier.height(120.dp)) }
                 }
             }
 
-            // Small floating button that brings the keypad back.
+            // Green dots button (same spot as the + button on Contacts) that brings the keypad back.
             androidx.compose.animation.AnimatedVisibility(
                 visible = !padVisible && !selecting && !searching,
-                modifier = Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 14.dp),
-                enter = fadeIn(tween(200)) + scaleIn(tween(200)),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 17.dp),
+                enter = fadeIn(tween(200)) + scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)),
                 exit = fadeOut(tween(150)) + scaleOut(tween(150))
             ) {
-                Box(
-                    Modifier.size(54.dp).clip(RoundedCornerShape(16.dp)).background(Pal.Card)
-                        .border(1.dp, Pal.Chip, RoundedCornerShape(16.dp)).clickable { padVisible = true },
-                    contentAlignment = Alignment.Center
-                ) { DotsGlyph() }
+                GreenFab(onClick = { padVisible = true }, icon = { DotsGlyph(Color.White) })
             }
         }
 
@@ -283,8 +285,8 @@ fun DialTab(
         } else {
             AnimatedVisibility(
                 visible = padVisible && !searching,
-                enter = slideInVertically(tween(240)) { it } + fadeIn(tween(240)),
-                exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150))
+                enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(200)),
+                exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(150))
             ) {
                 Keypad(
                     number = number,
@@ -336,25 +338,34 @@ fun DialTab(
 
 @Composable
 private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
-        Row(Modifier.clip(RoundedCornerShape(8.dp)).background(Pal.Chip)) {
-            listOf(false to "All", true to "Missed").forEach { (m, label) ->
-                val on = missedOnly == m
-                Box(
-                    Modifier.background(if (on) Pal.GreenDark else Color.Transparent)
-                        .clickable { onChange(m) }.padding(horizontal = 18.dp, vertical = 5.dp)
-                ) {
-                    Text(
-                        label, color = if (on) Pal.Green else Pal.Ink, fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium
-                    )
+    val segW = 84.dp
+    val segH = 36.dp
+    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.shadow(4.dp, CircleShape).background(Pal.Raised).padding(4.dp)) {
+            // The green highlight slides between All and Missed.
+            val x by animateDpAsState(
+                targetValue = if (missedOnly) segW else 0.dp,
+                animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
+                label = "filterHighlight"
+            )
+            Box(Modifier.offset(x = x).size(width = segW, height = segH).clip(CircleShape).background(Pal.GreenDark))
+            Row {
+                listOf(false to "All", true to "Missed").forEach { (m, label) ->
+                    val on = missedOnly == m
+                    val c by animateColorAsState(if (on) Pal.Green else Pal.Gray, tween(200), label = "filterText")
+                    Box(
+                        Modifier.size(width = segW, height = segH)
+                            .bounceClick(shape = CircleShape, pressedScale = 0.92f) { onChange(m) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(label, color = c, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Keypad(
     number: String,
@@ -366,64 +377,74 @@ private fun Keypad(
     onBackspace: () -> Unit,
     onClear: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().background(Pal.Bg)) {
-        HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
+    // White rounded card that floats above the navigation pill.
+    Column(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 92.dp)
+            .shadow(10.dp, RoundedCornerShape(32.dp)).background(Pal.Raised).padding(bottom = 6.dp)
+    ) {
         NumberBar(number, onPaste, onCopy)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
-        KEYS.forEach { row ->
-            Row(Modifier.fillMaxWidth()) {
-                row.forEach { (d, letters) ->
-                    Box(
-                        Modifier.weight(1f).height(60.dp).combinedClickable(
-                            onClick = { onKey(d) },
-                            onLongClick = if (d == "0") ({ onKey("+") }) else null
-                        ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                            Text(
-                                d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
-                                color = Pal.Ink, lineHeight = 30.sp
-                            )
-                            if (d == "1") VoicemailGlyph()
-                            else if (letters.isNotEmpty()) Text(
-                                letters, fontSize = 9.sp, color = Pal.Gray,
-                                fontWeight = FontWeight.Medium, lineHeight = 10.sp
-                            )
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+            KEYS.forEach { row ->
+                Row(Modifier.fillMaxWidth()) {
+                    row.forEach { (d, letters) ->
+                        Box(Modifier.weight(1f).height(56.dp), contentAlignment = Alignment.Center) {
+                            Box(
+                                Modifier.size(56.dp).bounceClick(
+                                    shape = CircleShape, pressedScale = 0.84f,
+                                    onLongClick = if (d == "0") ({ onKey("+") }) else null,
+                                    onClick = { onKey(d) }
+                                ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                    Text(
+                                        d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
+                                        color = Pal.Ink, lineHeight = 30.sp
+                                    )
+                                    if (d == "1") VoicemailGlyph()
+                                    else if (letters.isNotEmpty()) Text(
+                                        letters, fontSize = 9.sp, color = Pal.Gray,
+                                        fontWeight = FontWeight.Medium, lineHeight = 10.sp
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                HeaderIcon(onClick = onHide) { DotsGlyph() }
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Box(
-                    Modifier.size(60.dp).clip(CircleShape).background(Pal.Green).clickable(onClick = onCall),
-                    contentAlignment = Alignment.Center
-                ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(28.dp)) }
-            }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                Box(
-                    Modifier.size(48.dp).clip(CircleShape).combinedClickable(onClick = onBackspace, onLongClick = onClear),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Backspace, "Delete digit",
-                        tint = if (number.isNotEmpty()) Pal.Gray else Pal.Chip, modifier = Modifier.size(26.dp)
-                    )
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    HeaderIcon(onClick = onHide, plain = true) { DotsGlyph() }
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(60.dp)
+                            .bounceClick(shape = CircleShape, pressedScale = 0.88f, elevation = 6.dp, onClick = onCall)
+                            .background(Pal.Green),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(28.dp)) }
+                }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.size(48.dp).bounceClick(
+                            shape = CircleShape, pressedScale = 0.82f, onLongClick = onClear, onClick = onBackspace
+                        ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Backspace, "Delete digit",
+                            tint = if (number.isNotEmpty()) Pal.Gray else Pal.Chip, modifier = Modifier.size(26.dp)
+                        )
+                    }
                 }
             }
         }
     }
-    }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RecentRow(
+    modifier: Modifier = Modifier,
     e: LogEntry,
     title: String,
     showNumber: Boolean,
@@ -441,37 +462,45 @@ private fun RecentRow(
         else -> Icons.Default.CallMissed to Pal.Gray
     }
     val sub = if (showNumber) prettyNumber(e.number) else (e.location?.takeIf { it.isNotBlank() } ?: "Unknown location")
-    Column {
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         Row(
             Modifier.fillMaxWidth()
-                .combinedClickable(onClick = onClick, onLongClick = onLong)
-                .padding(start = 14.dp, end = 12.dp, top = 11.dp, bottom = 11.dp),
+                .bounceClick(shape = shape, pressedScale = 0.98f, onLongClick = onLong, onClick = onClick)
+                .background(if (missed) Pal.MissedBg else Color.Transparent)
+                .padding(start = 8.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (selecting) { SelectCircle(checked); Spacer(Modifier.width(12.dp)) }
-            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    title, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (missed) Pal.Missed else Pal.Ink
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (e.isHd) { TagChip("HD"); Spacer(Modifier.width(4.dp)) }
-                    if (e.isWifi) { TagChip("Wi-Fi"); Spacer(Modifier.width(4.dp)) }
-                    Text(sub, fontSize = 13.sp, color = Pal.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (e.isVolte) { TagChip("VoLTE"); Spacer(Modifier.width(5.dp)) }
+                    if (e.isHd) { TagChip("HD"); Spacer(Modifier.width(5.dp)) }
+                    if (e.isWifi) { TagChip("Wi-Fi"); Spacer(Modifier.width(5.dp)) }
+                    Text(
+                        sub, fontSize = 14.sp, color = if (missed) Pal.Missed else Pal.Gray,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Text(formatWhen(e.date), fontSize = 13.sp, color = Pal.Gray, maxLines = 1)
+            Text(formatWhen(e.date), fontSize = 14.sp, color = if (missed) Pal.Missed else Pal.Gray, maxLines = 1)
             Spacer(Modifier.width(10.dp))
             Box(
-                Modifier.size(28.dp).clip(CircleShape).background(Pal.Chip).clickable(onClick = onInfo),
+                Modifier.size(34.dp)
+                    .bounceClick(shape = CircleShape, pressedScale = 0.82f, onClick = onInfo)
+                    .background(Pal.Chip),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Gray, modifier = Modifier.size(20.dp)) }
+            ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Ink, modifier = Modifier.size(22.dp)) }
         }
-        HorizontalDivider(Modifier.padding(start = 44.dp), color = Pal.Divider, thickness = 0.5.dp)
+        HorizontalDivider(Modifier.padding(start = 42.dp), color = Pal.Divider, thickness = 0.5.dp)
     }
 }
 
@@ -483,11 +512,11 @@ private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> U
     // Re-check the clipboard whenever the typed number changes.
     val canPaste = remember(number) { cm.hasPrimaryClip() }
     Row(
-        Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            if (canPaste) HeaderIcon(onClick = {
+            if (canPaste) HeaderIcon(plain = true, onClick = {
                 val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
                 onPaste(t)
             }) { Icon(Icons.Default.ContentPaste, "Paste number", tint = Pal.Gray, modifier = Modifier.size(22.dp)) }
@@ -500,7 +529,7 @@ private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> U
             color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
         )
         Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            if (number.isNotEmpty()) HeaderIcon(onClick = onCopy) {
+            if (number.isNotEmpty()) HeaderIcon(plain = true, onClick = onCopy) {
                 Icon(Icons.Default.ContentCopy, "Copy number", tint = Pal.Gray, modifier = Modifier.size(22.dp))
             }
         }

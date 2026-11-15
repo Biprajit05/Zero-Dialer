@@ -284,7 +284,7 @@ private fun RingtoneRow(contactId: Long) {
 @Composable
 private fun RoundIconButton(icon: ImageVector, desc: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(40.dp).clip(CircleShape).background(Pal.Chip).clickable(onClick = onClick),
+        Modifier.size(40.dp).bounceClick(shape = CircleShape, pressedScale = 0.86f, onClick = onClick).background(Pal.Chip),
         contentAlignment = Alignment.Center
     ) { Icon(icon, desc, tint = Pal.Ink, modifier = Modifier.size(20.dp)) }
 }

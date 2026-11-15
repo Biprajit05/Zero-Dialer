@@ -11,7 +11,9 @@ import android.provider.ContactsContract
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -26,7 +28,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Call
-import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
@@ -45,6 +47,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -64,49 +67,61 @@ object Pal {
 
     private fun c(d: Long, l: Long) = Color(if (dark) d else l)
 
-    val Bg get() = c(0xFF000000, 0xFFFFFFFF)
-    val Card get() = c(0xFF1C1C1E, 0xFFF2F2F5)
-    val Sheet get() = c(0xFF2B2B2D, 0xFFF0F0F3)
-    val Field get() = c(0xFF1F1F21, 0xFFF2F2F5)
-    val Chip get() = c(0xFF3A3A3C, 0xFFE3E3E8)
-    val Green get() = c(0xFF30C85A, 0xFF1FA64A)
-    val GreenDark get() = c(0xFF123B20, 0xFFD3F0DC)
-    val Ink get() = c(0xFFFFFFFF, 0xFF111111)
-    val Gray get() = c(0xFF8E8E93, 0xFF6C6C70)
-    val Divider get() = c(0xFF262628, 0xFFE4E4E8)
+    /** Page background (light grey in light mode). */
+    val Bg get() = c(0xFF0B0B0C, 0xFFF4F4F4)
+    /** Floating things that sit on the page: header buttons, search pill, nav bar, keypad. */
+    val Raised get() = c(0xFF1F1F21, 0xFFFFFFFF)
+    val Card get() = c(0xFF1C1C1E, 0xFFFFFFFF)
+    val Sheet get() = c(0xFF2B2B2D, 0xFFFFFFFF)
+    val Field get() = c(0xFF1F1F21, 0xFFFFFFFF)
+    val Chip get() = c(0xFF3A3A3C, 0xFFE4E4E4)
+    val Green get() = c(0xFF3FBF2E, 0xFF43B02A)
+    val GreenDark get() = c(0xFF1D4A19, 0xFFC9F6BF)
+    val Ink get() = c(0xFFFFFFFF, 0xFF121212)
+    val Gray get() = c(0xFF9A9AA0, 0xFF666666)
+    val Divider get() = c(0xFF2A2A2C, 0xFFD3D3D3)
     val Red get() = c(0xFFFF4B4B, 0xFFE5322D)
-    val Missed get() = c(0xFFFF5A52, 0xFFE5322D)
+    val Missed get() = c(0xFFFF5A52, 0xFFD93025)
+    /** Soft highlight behind a missed-call row. */
+    val MissedBg get() = c(0xFF1F1717, 0xB3FFFFFF)
+    /** Colours of the VoLTE / HD tags. */
+    val Tag get() = c(0xFF3A3A3C, 0xFFBDBDBD)
+    val TagText get() = c(0xFF9A9AA0, 0xFFF7F7F7)
     val Link get() = c(0xFF3D8BFF, 0xFF1A6DFF)
 }
 
 /** Big page title that shrinks to a small one once the list below has been scrolled. */
 @Composable
 fun CollapsingHeader(title: String, collapsed: Boolean, actions: @Composable RowScope.() -> Unit = {}) {
-    val size by animateFloatAsState(if (collapsed) 20f else 30f, tween(180), label = "titleSize")
-    val top by animateDpAsState(if (collapsed) 8.dp else 22.dp, tween(180), label = "titleTop")
+    val size by animateFloatAsState(if (collapsed) 24f else 38f, tween(220), label = "titleSize")
+    val top by animateDpAsState(if (collapsed) 8.dp else 22.dp, tween(220), label = "titleTop")
     Row(
-        Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = top, bottom = 6.dp).heightIn(min = 44.dp),
-        verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth().padding(start = 24.dp, end = 14.dp, top = top, bottom = 8.dp).heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text(
-            title, fontSize = size.sp, fontWeight = FontWeight.SemiBold, color = Pal.Ink,
+            title, fontSize = size.sp, fontWeight = FontWeight.Bold, color = Pal.Ink,
             maxLines = 1, modifier = Modifier.weight(1f)
         )
         actions()
     }
 }
 
+/** Round header button: a white chip with a soft shadow (or bare, with [plain]) that bounces when tapped. */
 @Composable
-fun HeaderIcon(onClick: () -> Unit, content: @Composable () -> Unit) {
+fun HeaderIcon(onClick: () -> Unit, plain: Boolean = false, content: @Composable () -> Unit) {
     Box(
-        Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick),
+        Modifier.size(44.dp)
+            .bounceClick(shape = CircleShape, pressedScale = 0.86f, elevation = if (plain) 0.dp else 3.dp, onClick = onClick)
+            .background(if (plain) Color.Transparent else Pal.Raised),
         contentAlignment = Alignment.Center
     ) { content() }
 }
 
 @Composable
 fun SelectIcon() {
-    Icon(Icons.Outlined.CheckBox, "Select", tint = Pal.Ink, modifier = Modifier.size(24.dp))
+    Icon(Icons.Outlined.CheckCircle, "Select", tint = Pal.Ink, modifier = Modifier.size(26.dp))
 }
 
 /** Header shown while picking items: select-all box, "N selected", close. */
@@ -144,12 +159,19 @@ fun SelectAllGlyph(state: Int) {
 
 @Composable
 fun SelectCircle(checked: Boolean) {
-    if (checked) {
-        Box(Modifier.size(22.dp).clip(CircleShape).background(Pal.Green), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(15.dp))
-        }
-    } else {
+    val pop by animateFloatAsState(
+        if (checked) 1f else 0f,
+        spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "selectPop"
+    )
+    Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
         Box(Modifier.size(22.dp).border(2.dp, Pal.Chip, CircleShape))
+        Box(
+            Modifier.size(22.dp)
+                .graphicsLayer { scaleX = pop; scaleY = pop; alpha = pop.coerceIn(0f, 1f) }
+                .clip(CircleShape).background(Pal.Green),
+            contentAlignment = Alignment.Center
+        ) { Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(15.dp)) }
     }
 }
 
@@ -164,38 +186,38 @@ fun SearchPill(
     val fr = remember { FocusRequester() }
     if (autoFocus) LaunchedEffect(Unit) { fr.requestFocus() }
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).height(40.dp)
-            .clip(RoundedCornerShape(20.dp)).background(Pal.Field).padding(horizontal = 12.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(52.dp)
+            .shadow(3.dp, CircleShape).background(Pal.Raised).padding(start = 14.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(Icons.Outlined.Search, null, tint = Pal.Gray, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.width(8.dp))
+        Icon(Icons.Outlined.Search, null, tint = Pal.Ink, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
-            if (query.isEmpty()) Text(hint, color = Pal.Gray, fontSize = 15.sp, maxLines = 1)
+            if (query.isEmpty()) Text(hint, color = Pal.Gray, fontSize = 18.sp, maxLines = 1)
             BasicTextField(
                 value = query, onValueChange = onQuery, singleLine = true,
-                textStyle = TextStyle(color = Pal.Ink, fontSize = 15.sp),
+                textStyle = TextStyle(color = Pal.Ink, fontSize = 18.sp),
                 cursorBrush = SolidColor(Pal.Green),
                 modifier = Modifier.fillMaxWidth().focusRequester(fr)
             )
         }
         if (query.isNotEmpty() || onClose != null) {
             Box(
-                Modifier.size(24.dp).clip(CircleShape)
-                    .clickable { if (query.isNotEmpty()) onQuery("") else onClose?.invoke() },
+                Modifier.size(32.dp)
+                    .bounceClick(shape = CircleShape, pressedScale = 0.8f) { if (query.isNotEmpty()) onQuery("") else onClose?.invoke() },
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.Close, "Clear", tint = Pal.Gray, modifier = Modifier.size(16.dp)) }
+            ) { Icon(Icons.Default.Close, "Clear", tint = Pal.Gray, modifier = Modifier.size(20.dp)) }
         }
     }
 }
 
-/** Letter badge that starts each contact section. */
+/** Big green circle with the letter that starts each contact section. */
 @Composable
 fun SectionBadge(letter: Char) {
     Box(
-        Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)).background(Pal.Green),
+        Modifier.size(44.dp).clip(CircleShape).background(Pal.Green),
         contentAlignment = Alignment.Center
-    ) { Text(letter.toString(), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+    ) { Text(letter.toString(), color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold) }
 }
 
 private object PhotoCache {
@@ -220,7 +242,7 @@ private object PhotoCache {
 
 /** Round contact avatar: the contact's photo if there is one, otherwise their first letter. */
 @Composable
-fun Avatar(name: String, size: Dp, contactId: Long = 0L, person: Boolean = false) {
+fun Avatar(name: String, size: Dp, contactId: Long = 0L, person: Boolean = false, icon: ImageVector? = null) {
     val ctx = LocalContext.current
     val photo by produceState<ImageBitmap?>(PhotoCache.get(contactId), contactId) {
         if (contactId <= 0L || value != null) return@produceState
@@ -230,22 +252,24 @@ fun Avatar(name: String, size: Dp, contactId: Long = 0L, person: Boolean = false
         val p = photo
         if (p != null) {
             Image(bitmap = p, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else if (icon != null) {
+            Icon(icon, null, tint = Pal.Gray, modifier = Modifier.size(size * 0.6f))
         } else if (person) {
             Icon(Icons.Default.Person, null, tint = Pal.Gray, modifier = Modifier.size(size * 0.6f))
         } else {
             Text(
-                initialOf(name).toString(), color = Pal.Ink.copy(alpha = 0.75f),
-                fontSize = (size.value * 0.42f).sp
+                initialOf(name).toString(), color = Pal.Gray,
+                fontSize = (size.value * 0.45f).sp
             )
         }
     }
 }
 
-/** Small grey tag such as "HD". */
+/** Small grey tag such as "VoLTE" or "HD". */
 @Composable
 fun TagChip(text: String) {
-    Box(Modifier.clip(RoundedCornerShape(3.dp)).background(Pal.Chip).padding(horizontal = 4.dp, vertical = 1.dp)) {
-        Text(text, color = Pal.Gray, fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 11.sp)
+    Box(Modifier.clip(RoundedCornerShape(3.dp)).background(Pal.Tag).padding(horizontal = 4.dp, vertical = 1.dp)) {
+        Text(text, color = Pal.TagText, fontSize = 9.sp, fontWeight = FontWeight.Bold, lineHeight = 11.sp)
     }
 }
 
@@ -272,20 +296,31 @@ fun DotsGlyph(color: Color = Pal.Green) {
     }
 }
 
+/** Big round green action button that floats next to the navigation bar. */
 @Composable
-fun GreenFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun GreenFab(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: @Composable () -> Unit = {
+        Icon(Icons.Default.Add, "Add", tint = Color.White, modifier = Modifier.size(34.dp))
+    }
+) {
     Box(
-        modifier.size(56.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(Pal.Green).clickable(onClick = onClick),
+        modifier.size(62.dp)
+            .bounceClick(shape = CircleShape, pressedScale = 0.88f, elevation = 8.dp, onClick = onClick)
+            .background(Pal.Green),
         contentAlignment = Alignment.Center
-    ) { Icon(Icons.Default.Add, "Add", tint = Color.White, modifier = Modifier.size(28.dp)) }
+    ) { icon() }
 }
 
 /** Bottom bar shown while items are selected. */
 @Composable
 fun DeleteBar(enabled: Boolean, onClick: () -> Unit) {
-    val c = if (enabled) Pal.Ink else Pal.Chip
+    val c by animateColorAsState(if (enabled) Pal.Ink else Pal.Chip, tween(150), label = "deleteColor")
     Box(
-        Modifier.fillMaxWidth().background(Pal.Bg).navigationBarsPadding()
+        Modifier.fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .background(Pal.Raised)
             .clickable(enabled = enabled, onClick = onClick).padding(vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -306,8 +341,9 @@ fun ConfirmDialog(text: String, confirmLabel: String, onConfirm: () -> Unit, onD
             Text(text, color = Pal.Ink, fontSize = 16.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(24.dp))
             Box(
-                Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(24.dp)).background(Pal.Red)
-                    .clickable(onClick = onConfirm),
+                Modifier.fillMaxWidth().height(48.dp)
+                    .bounceClick(shape = RoundedCornerShape(24.dp), pressedScale = 0.96f, onClick = onConfirm)
+                    .background(Pal.Red),
                 contentAlignment = Alignment.Center
             ) { Text(confirmLabel, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium) }
             Spacer(Modifier.height(10.dp))
@@ -370,32 +406,53 @@ fun ActionDialog(name: String, number: String, history: List<LogEntry>, onDismis
     )
 }
 
-private class TabItem(val on: ImageVector, val off: ImageVector, val label: String)
+private class TabItem(val icon: ImageVector, val label: String)
 
+/** Floating white pill with Dial / Contacts / Favourites. A grey highlight slides to the chosen tab. */
 @Composable
-fun BottomBar(tab: Int, onTab: (Int) -> Unit) {
+fun FloatingNav(tab: Int, onTab: (Int) -> Unit, modifier: Modifier = Modifier) {
     val items = remember {
         listOf(
-            TabItem(Icons.Filled.Call, Icons.Outlined.Call, "Dial"),
-            TabItem(Icons.Filled.Person, Icons.Outlined.Person, "Contacts"),
-            TabItem(Icons.Filled.Star, Icons.Outlined.StarBorder, "Favorites")
+            TabItem(Icons.Filled.Call, "Dial"),
+            TabItem(Icons.Filled.People, "Contacts"),
+            TabItem(Icons.Filled.Star, "Favourites")
         )
     }
-    Column(Modifier.fillMaxWidth().background(Pal.Bg).navigationBarsPadding()) {
-        HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
-        Row(Modifier.fillMaxWidth().height(58.dp)) {
+    val pill = RoundedCornerShape(34.dp)
+    BoxWithConstraints(
+        modifier.height(68.dp).shadow(10.dp, pill).background(Pal.Raised).padding(6.dp)
+    ) {
+        val tabW = maxWidth / 3
+        val x by animateDpAsState(
+            targetValue = tabW * tab,
+            animationSpec = spring(dampingRatio = 0.72f, stiffness = Spring.StiffnessMediumLow),
+            label = "navHighlight"
+        )
+        Box(
+            Modifier.offset(x = x).width(tabW).fillMaxHeight()
+                .clip(RoundedCornerShape(28.dp)).background(Pal.Chip)
+        )
+        Row(Modifier.fillMaxSize()) {
             items.forEachIndexed { i, item ->
                 val selected = tab == i
-                val c by animateColorAsState(if (selected) Pal.Green else Pal.Gray, tween(150), label = "tabColor")
-                val s by animateFloatAsState(if (selected) 1.12f else 1f, tween(150), label = "tabScale")
+                val c by animateColorAsState(if (selected) Pal.Green else Pal.Gray, tween(180), label = "tabColor")
+                val s by animateFloatAsState(
+                    if (selected) 1.14f else 1f,
+                    spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                    label = "tabScale"
+                )
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().clickable { onTab(i) },
+                    Modifier.weight(1f).fillMaxHeight()
+                        .bounceClick(shape = RoundedCornerShape(28.dp), pressedScale = 0.9f) { onTab(i) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(if (selected) item.on else item.off, item.label, tint = c, modifier = Modifier.size(24.dp).scale(s))
+                    Icon(item.icon, item.label, tint = c, modifier = Modifier.size(26.dp).scale(s))
                     Spacer(Modifier.height(2.dp))
-                    Text(item.label, fontSize = 11.sp, color = c, fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal)
+                    Text(
+                        item.label, fontSize = 11.sp, color = c, maxLines = 1,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                    )
                 }
             }
         }

@@ -16,6 +16,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -32,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -148,7 +151,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
     BackHandler(enabled = overlay != null) { overlay = null }
 
     Box(Modifier.fillMaxSize().background(Pal.Bg)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
             if (!isDefault) {
                 Row(
                     Modifier.fillMaxWidth().background(if (Pal.dark) Color(0xFF3A3220) else Color(0xFFFFF0C9)).padding(horizontal = 16.dp, vertical = 8.dp),
@@ -161,10 +164,16 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     TextButton(onClick = onRequestRole) { Text("Set default", color = Pal.Green) }
                 }
             }
+            val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 AnimatedContent(
                     targetState = tab,
-                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
+                    transitionSpec = {
+                        // New tab slides in from the side it sits on, old one drifts away and fades.
+                        val dir = if (targetState > initialState) 1 else -1
+                        (fadeIn(tween(240)) + slideInHorizontally(tween(280)) { (it / 12) * dir }) togetherWith
+                            (fadeOut(tween(120)) + slideOutHorizontally(tween(280)) { -(it / 12) * dir })
+                    },
                     label = "tabs"
                 ) { t ->
                     when (t) {
@@ -193,8 +202,19 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                         )
                     }
                 }
+                // Floating nav pill (the green action button of each tab sits to its right).
+                AnimatedVisibility(
+                    visible = !barHidden && !imeOpen,
+                    modifier = Modifier.align(Alignment.BottomStart),
+                    enter = slideInVertically(tween(280)) { it } + fadeIn(tween(220)),
+                    exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150))
+                ) {
+                    FloatingNav(
+                        tab = tab, onTab = { tab = it },
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 90.dp, bottom = 14.dp)
+                    )
+                }
             }
-            AnimatedVisibility(visible = !barHidden) { BottomBar(tab) { tab = it } }
         }
 
         AnimatedContent(

@@ -30,6 +30,7 @@ data class LogEntry(
     // CallLog.Calls.FEATURES bit flags
     val isHd get() = features and 0x4 != 0
     val isWifi get() = features and 0x8 != 0
+    val isVolte get() = features and 0x40 != 0
 }
 
 data class Contact(val id: Long, val name: String, val number: String, val starred: Boolean)
@@ -66,6 +67,21 @@ fun loadLog(ctx: Context): List<LogEntry> {
                 }
             }
     } catch (e: SecurityException) { }
+    return out
+}
+
+/** Ids of contacts that are stored in a Google account (they get the small "G" badge). */
+fun loadGoogleContactIds(ctx: Context): Set<Long> {
+    val out = HashSet<Long>()
+    try {
+        ctx.contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.CONTACT_ID, ContactsContract.RawContacts.ACCOUNT_TYPE),
+            "${ContactsContract.RawContacts.DELETED} = 0", null, null
+        )?.use { c ->
+            while (c.moveToNext()) if (c.getString(1) == "com.google") out.add(c.getLong(0))
+        }
+    } catch (e: Exception) { }
     return out
 }
 

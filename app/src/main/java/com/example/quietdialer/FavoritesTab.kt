@@ -40,32 +40,35 @@ fun FavoritesTab(
 
     Box(Modifier.fillMaxSize().background(Pal.Bg)) {
         Column(Modifier.fillMaxSize()) {
-            CollapsingHeader("Favorites", false)
+            CollapsingHeader("Favourites", false)
             when {
                 !canRead -> PermissionPrompt("Allow contacts access to see your favorites here.", onRequestPerms)
                 favs.isEmpty() -> Box(Modifier.fillMaxSize().padding(bottom = 120.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         SmileGlyph()
                         Spacer(Modifier.height(14.dp))
-                        Text("No favorite contacts", color = Pal.Ink, fontSize = 16.sp, textAlign = TextAlign.Center)
+                        Text("No favourite contacts", color = Pal.Ink, fontSize = 16.sp, textAlign = TextAlign.Center)
                     }
                 }
                 else -> LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 96.dp),
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 120.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(favs, key = { it.id }) { c ->
                         Column(
-                            Modifier.padding(4.dp).clip(RoundedCornerShape(16.dp))
-                                .combinedClickable(onClick = { placeCall(ctx, c.number) }, onLongClick = { onOpenContact(c) })
+                            Modifier.padding(4.dp)
+                                .bounceClick(
+                                    shape = RoundedCornerShape(16.dp), pressedScale = 0.92f,
+                                    onLongClick = { onOpenContact(c) }, onClick = { placeCall(ctx, c.number) }
+                                )
                                 .padding(vertical = 12.dp, horizontal = 4.dp).fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Avatar(c.name, 72.dp, c.id)
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                c.name, fontSize = 14.sp, color = Pal.Ink, maxLines = 1,
+                                c.name, fontSize = 15.sp, color = Pal.Ink, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center
                             )
                         }
@@ -73,7 +76,7 @@ fun FavoritesTab(
                 }
             }
         }
-        GreenFab(onAddFavorite, Modifier.align(Alignment.BottomEnd).padding(16.dp))
+        GreenFab(onAddFavorite, Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 17.dp))
     }
 }
 

@@ -128,8 +128,8 @@ fun CallScreen(
             if (ringing) {
                 Spacer(Modifier.height(22.dp))
                 Row(
-                    Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.16f))
-                        .clickable { showSms = true }.padding(horizontal = 14.dp, vertical = 7.dp),
+                    Modifier.bounceClick(shape = RoundedCornerShape(50), pressedScale = 0.94f) { showSms = true }
+                        .background(Color.White.copy(alpha = 0.16f)).padding(horizontal = 14.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(Icons.Default.ChatBubble, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(14.dp))
@@ -144,8 +144,8 @@ fun CallScreen(
             if (other != null) {
                 Spacer(Modifier.height(12.dp))
                 Box(
-                    Modifier.clip(CircleShape).background(Btn).clickable(onClick = onSwap)
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                    Modifier.bounceClick(shape = CircleShape, pressedScale = 0.94f, onClick = onSwap)
+                        .background(Btn).padding(horizontal = 16.dp, vertical = 8.dp)
                 ) { Text("On hold: ${other.title}  ·  Swap", color = Color.White, fontSize = 14.sp) }
             }
             if (showPad) {
@@ -224,9 +224,9 @@ private fun RoundAction(
 ) {
     Column(Modifier.width(92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(size.dp).clip(CircleShape)
-                .background(container ?: if (active) Color.White else Btn)
-                .clickable(enabled = enabled, onClick = onClick),
+            Modifier.size(size.dp)
+                .bounceClick(shape = CircleShape, pressedScale = 0.88f, enabled = enabled, onClick = onClick)
+                .background(container ?: if (active) Color.White else Btn),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -348,7 +348,7 @@ private fun InCallKeypad(onKey: (Char, Boolean) -> Unit, onHide: () -> Unit, onE
                 TextButton(onClick = onHide) { Text("Hide", color = Color.White, fontSize = 16.sp) }
             }
             Box(
-                Modifier.size(72.dp).clip(CircleShape).background(Red).clickable(onClick = onEnd),
+                Modifier.size(72.dp).bounceClick(shape = CircleShape, pressedScale = 0.88f, onClick = onEnd).background(Red),
                 contentAlignment = Alignment.Center
             ) { Icon(Icons.Default.CallEnd, "End", tint = Color.White, modifier = Modifier.size(30.dp)) }
             Spacer(Modifier.width(92.dp))
