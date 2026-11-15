@@ -87,6 +87,12 @@ object Pal {
     /** Colours of the VoLTE / HD tags. */
     val Tag get() = c(0xFF3A3A3C, 0xFFBDBDBD)
     val TagText get() = c(0xFF9A9AA0, 0xFFF7F7F7)
+    /** Keypad sheet: panel, key pills, grab handle, call button, small letters. */
+    val PadBg get() = c(0xFF161618, 0xFFEAE9EE)
+    val Key get() = c(0xFF2C2C2F, 0xFFF5F4F7)
+    val Handle get() = c(0xFF5A5A5F, 0xFFAAA9AE)
+    val CallGreen get() = c(0xFF00B518, 0xFF00C015)
+    val KeyLetters get() = c(0xFF9A9AA0, 0xFF76757A)
     val Link get() = c(0xFF3D8BFF, 0xFF1A6DFF)
 }
 

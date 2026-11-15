@@ -10,7 +10,10 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -51,6 +54,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -121,6 +128,26 @@ fun DialTab(
             }
         }
     }
+
+    // --- keypad sheet state -------------------------------------------------------------
+    val padShown = padVisible && !searching && !selecting
+    // 0 = keypad closed (green dots button), 1 = keypad open (call pill). Drives the button morph.
+    val morph by animateFloatAsState(
+        targetValue = if (padShown) 1f else 0f,
+        animationSpec = tween(if (padShown) 300 else 240, easing = FastOutSlowInEasing),
+        label = "padMorph"
+    )
+    val fabVisible by animateFloatAsState(
+        targetValue = if (!selecting && !searching) 1f else 0f, animationSpec = tween(180), label = "fabVisible"
+    )
+    val density = LocalDensity.current
+    var padPx by remember { mutableIntStateOf(0) }
+    // Room the list leaves for the keypad sheet (it slides over the bottom of the list).
+    val padSpace by animateDpAsState(
+        targetValue = if (padShown) with(density) { padPx.toDp() } else 0.dp,
+        animationSpec = tween(260, easing = FastOutSlowInEasing), label = "padSpace"
+    )
+    val screenW = LocalConfiguration.current.screenWidthDp.dp
 
     val canRead = remember(permsVersion) { hasPerm(ctx, Manifest.permission.READ_CALL_LOG) }
 
@@ -234,17 +261,22 @@ fun DialTab(
         // ---------- list area ----------
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                number.isNotEmpty() && !selecting -> Suggestions(
-                    number = number, contacts = contacts, showNumber = !padVisible,
-                    onNewContact = onNewContact
-                ) { placeCall(ctx, it); onNumber("") }
+                number.isNotEmpty() && !selecting -> Box(Modifier.fillMaxSize().padding(bottom = padSpace)) {
+                    Suggestions(
+                        number = number, contacts = contacts, showNumber = !padVisible,
+                        onNewContact = onNewContact
+                    ) { placeCall(ctx, it); onNumber("") }
+                }
                 !canRead -> PermissionPrompt("Allow call log access to see your recent calls.", onRequestPerms)
                 all == null -> Text("Loading…", Modifier.align(Alignment.Center), color = Pal.Gray)
                 shown.isEmpty() -> Text(
                     if (missedOnly) "No missed calls" else "No recent calls",
                     Modifier.align(Alignment.Center), color = Pal.Gray
                 )
-                else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize().nestedScroll(scrollWatcher)) {
+                else -> LazyColumn(
+                    state = listState, modifier = Modifier.fillMaxSize().nestedScroll(scrollWatcher),
+                    contentPadding = PaddingValues(bottom = maxOf(120.dp, padSpace))
+                ) {
                     items(shown, key = { it.id }) { e ->
                         val nm = nameFor(e, nameMap)
                         RecentRow(
@@ -264,32 +296,20 @@ fun DialTab(
                             onInfo = { onOpenInfo(e.number) }
                         )
                     }
-                    item { Spacer(Modifier.height(120.dp)) }
                 }
             }
 
-            // Green dots button (same spot as the + button on Contacts) that brings the keypad back.
+            // The keypad is a sheet that slides up over the bottom of the list.
             androidx.compose.animation.AnimatedVisibility(
-                visible = !padVisible && !selecting && !searching,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 17.dp),
-                enter = fadeIn(tween(200)) + scaleIn(spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)),
-                exit = fadeOut(tween(150)) + scaleOut(tween(150))
-            ) {
-                GreenFab(onClick = { padVisible = true }, icon = { DotsGlyph(Color.White) })
-            }
-        }
-
-        // ---------- keypad / delete bar ----------
-        if (selecting) {
-            DeleteBar(enabled = selected.isNotEmpty()) { confirmDelete = true }
-        } else {
-            AnimatedVisibility(
-                visible = padVisible && !searching,
-                enter = slideInVertically(spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) { it } + fadeIn(tween(200)),
-                exit = slideOutVertically(tween(220)) { it } + fadeOut(tween(150))
+                visible = padShown,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                enter = slideInVertically(spring(dampingRatio = 0.85f, stiffness = 900f)) { it },
+                exit = slideOutVertically(tween(230, easing = FastOutLinearInEasing)) { it }
             ) {
                 Keypad(
+                    modifier = Modifier.onSizeChanged { padPx = it.height },
                     number = number,
+                    morph = { morph },
                     onPaste = { text ->
                         val clean = text.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
                         if (clean.isEmpty()) Toast.makeText(ctx, "No number to paste", Toast.LENGTH_SHORT).show()
@@ -303,7 +323,28 @@ fun DialTab(
                     onClear = { onNumber("") }
                 )
             }
+
+            // Green dots button (same spot as the + button on Contacts). When the keypad opens it
+            // shrinks and slides toward the centre while the call pill grows out of it.
+            val fabAlpha = fabVisible * (1f - morph * 1.6f).coerceIn(0f, 1f)
+            if (fabAlpha > 0.01f) {
+                GreenFab(
+                    onClick = { padVisible = true },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 17.dp)
+                        .graphicsLayer {
+                            alpha = fabAlpha
+                            val sc = 1f - 0.5f * morph
+                            scaleX = sc; scaleY = sc
+                            translationX = -(screenW.toPx() * 0.28f) * morph
+                            translationY = -(90.dp.toPx()) * morph
+                        },
+                    icon = { DotsGlyph(Color.White) }
+                )
+            }
         }
+
+        // ---------- delete bar (selection mode) ----------
+        if (selecting) DeleteBar(enabled = selected.isNotEmpty()) { confirmDelete = true }
     }
 
     if (themeOpen) {
@@ -366,9 +407,12 @@ private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
     }
 }
 
+/** The keypad sheet: pill-shaped keys, a wide green call pill, a grab handle on top. */
 @Composable
 private fun Keypad(
+    modifier: Modifier = Modifier,
     number: String,
+    morph: () -> Float,
     onPaste: (String) -> Unit,
     onCopy: () -> Unit,
     onKey: (String) -> Unit,
@@ -377,65 +421,85 @@ private fun Keypad(
     onBackspace: () -> Unit,
     onClear: () -> Unit
 ) {
-    // White rounded card that floats above the navigation pill.
+    val keyShape = RoundedCornerShape(50)
     Column(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 92.dp)
-            .shadow(10.dp, RoundedCornerShape(32.dp)).background(Pal.Raised).padding(bottom = 6.dp)
+        modifier.fillMaxWidth()
+            .background(Pal.PadBg, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
+            // the nav pill floats over this bottom part
+            .padding(bottom = 109.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        NumberBar(number, onPaste, onCopy)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(12.dp))
+        Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Pal.Handle))
+        Spacer(Modifier.height(10.dp))
+        AnimatedVisibility(visible = number.isNotEmpty(), enter = expandVertically(tween(160)) + fadeIn(tween(160)), exit = shrinkVertically(tween(140)) + fadeOut(tween(100))) {
+            NumberBar(number, onPaste, onCopy)
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             KEYS.forEach { row ->
-                Row(Modifier.fillMaxWidth()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { (d, letters) ->
-                        Box(Modifier.weight(1f).height(56.dp), contentAlignment = Alignment.Center) {
-                            Box(
-                                Modifier.size(56.dp).bounceClick(
-                                    shape = CircleShape, pressedScale = 0.84f,
+                        Box(
+                            Modifier.weight(1f).height(58.dp)
+                                .bounceClick(
+                                    shape = keyShape, pressedScale = 0.93f,
                                     onLongClick = if (d == "0") ({ onKey("+") }) else null,
                                     onClick = { onKey(d) }
-                                ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                                    Text(
-                                        d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
-                                        color = Pal.Ink, lineHeight = 30.sp
-                                    )
-                                    if (d == "1") VoicemailGlyph()
-                                    else if (letters.isNotEmpty()) Text(
-                                        letters, fontSize = 9.sp, color = Pal.Gray,
-                                        fontWeight = FontWeight.Medium, lineHeight = 10.sp
-                                    )
-                                }
+                                )
+                                .background(Pal.Key),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                                Text(
+                                    d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
+                                    color = Pal.Ink, lineHeight = 30.sp
+                                )
+                                if (d == "1") VoicemailGlyph()
+                                else if (letters.isNotEmpty()) Text(
+                                    letters, fontSize = 9.sp, color = Pal.KeyLetters,
+                                    fontWeight = FontWeight.Medium, lineHeight = 10.sp
+                                )
                             }
                         }
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    HeaderIcon(onClick = onHide, plain = true) { DotsGlyph() }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(60.dp)
-                            .bounceClick(shape = CircleShape, pressedScale = 0.88f, elevation = 6.dp, onClick = onCall)
-                            .background(Pal.Green),
-                        contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(28.dp)) }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(48.dp).bounceClick(
-                            shape = CircleShape, pressedScale = 0.82f, onLongClick = onClear, onClick = onBackspace
-                        ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Backspace, "Delete digit",
-                            tint = if (number.isNotEmpty()) Pal.Gray else Pal.Chip, modifier = Modifier.size(26.dp)
-                        )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                // hide keypad
+                Box(
+                    Modifier.weight(1f).height(58.dp)
+                        .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onHide)
+                        .background(Pal.Key),
+                    contentAlignment = Alignment.Center
+                ) { DotsGlyph(Pal.Ink) }
+                // call: grows out of the green button when the sheet opens
+                Box(
+                    Modifier.weight(1f).height(58.dp).graphicsLayer {
+                        val m = morph()
+                        scaleX = 0.35f + 0.65f * m
+                        scaleY = 0.6f + 0.4f * m
+                        alpha = (m * 1.6f).coerceIn(0f, 1f)
                     }
+                ) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onCall)
+                            .background(Pal.CallGreen),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(30.dp)) }
+                }
+                // backspace (long press clears)
+                Box(
+                    Modifier.weight(1f).height(58.dp)
+                        .bounceClick(shape = keyShape, pressedScale = 0.93f, onLongClick = onClear, onClick = onBackspace)
+                        .background(Pal.Key),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Backspace, "Delete digit",
+                        tint = Pal.KeyLetters.copy(alpha = if (number.isNotEmpty()) 1f else 0.7f),
+                        modifier = Modifier.size(28.dp)
+                    )
                 }
             }
         }
