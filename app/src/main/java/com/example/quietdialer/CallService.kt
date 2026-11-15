@@ -187,17 +187,17 @@ class CallService : InCallService() {
             v.setTextViewText(R.id.notif_status, if (call.state == Call.STATE_HOLDING) "On hold" else "Calling…")
         }
 
-        // Off = grey circle + dark icon, On = blue circle + white icon.
+        // Off = dark circle + white icon, On = white circle + dark icon.
         val muted = CallManager.isMuted()
         val speaker = CallManager.isSpeaker()
         v.setInt(R.id.notif_mute, "setBackgroundResource",
-            if (muted) R.drawable.notif_btn_blue else R.drawable.notif_btn_gray)
+            if (muted) R.drawable.notif_btn_white else R.drawable.notif_btn_gray)
         v.setImageViewResource(R.id.notif_mute,
-            if (muted) R.drawable.notif_ic_mic_white else R.drawable.notif_ic_mic_dark)
+            if (muted) R.drawable.notif_ic_mic_dark else R.drawable.notif_ic_mic_white)
         v.setInt(R.id.notif_speaker, "setBackgroundResource",
-            if (speaker) R.drawable.notif_btn_blue else R.drawable.notif_btn_gray)
+            if (speaker) R.drawable.notif_btn_white else R.drawable.notif_btn_gray)
         v.setImageViewResource(R.id.notif_speaker,
-            if (speaker) R.drawable.notif_ic_speaker_white else R.drawable.notif_ic_speaker_dark)
+            if (speaker) R.drawable.notif_ic_speaker_dark else R.drawable.notif_ic_speaker_white)
 
         v.setOnClickPendingIntent(R.id.notif_mute, actionIntent(13, CallActionReceiver.MUTE))
         v.setOnClickPendingIntent(R.id.notif_speaker, actionIntent(14, CallActionReceiver.SPEAKER))
