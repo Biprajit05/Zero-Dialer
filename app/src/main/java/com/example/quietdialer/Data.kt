@@ -183,7 +183,9 @@ fun formatFull(ts: Long): String =
 
 /** Name to show for a log entry: log's cached name, else address-book match, else "". */
 fun nameFor(e: LogEntry, map: Map<String, String>): String =
-    e.name?.takeIf { it.isNotBlank() } ?: map[numberKey(e.number)] ?: ""
+    // The log's cached name goes stale when a contact is deleted or renamed, so the address book wins.
+    // The cached name is only used while the address book isn't available (not loaded yet / no permission).
+    if (map.isNotEmpty()) map[numberKey(e.number)] ?: "" else e.name?.takeIf { it.isNotBlank() } ?: ""
 
 private fun t9(s: String): String = buildString {
     for (ch in s.lowercase()) {
