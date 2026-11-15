@@ -1,6 +1,13 @@
 # Quiet Dialer
 Basic Android dialer with a clean Dial / Contacts / Favorites layout.
 
+**Update 2 – new look + animations**
+- UI redesigned to match the reference: big bold titles, light-grey page with white floating buttons, floating pill navigation bar (Dial / Contacts / Favourites) with a green action button beside it
+- Recents: VoLTE / HD / Wi-Fi tags, round chevron buttons, highlighted red missed-call rows, sliding All / Missed switch
+- Contacts: search pill, Profile / Groups rows, big green letter badges, Google "G" badge, full # A-Z index
+- Keypad is now a floating white card; the green dots button brings it back
+- Every button has a press animation (spring "bounce" + ripple, see Motion.kt `bounceClick`); nav highlight and All/Missed highlight slide, tabs slide/fade, list items animate when they move, selection checks pop in
+
 **Update 1**
 - New Dial screen: large title, recents on top, always-visible keypad below (hide/show it with the dots button)
 - Recents show name, HD / Wi-Fi tags, number, time (today / Yesterday / date), outgoing-call icon, and a details button
