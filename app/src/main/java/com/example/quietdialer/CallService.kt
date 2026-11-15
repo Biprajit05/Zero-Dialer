@@ -1,5 +1,6 @@
 package com.example.quietdialer
 
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -7,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.Ringtone
 import android.media.RingtoneManager
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.View
 import android.widget.RemoteViews
@@ -71,9 +73,11 @@ class CallService : InCallService() {
         call.registerCallback(cb)
         CallManager.add(call, this)
         onCallsChanged()
-        // Always try to open our call screen right away. For incoming calls the full-screen
-        // notification is the backup if the system blocks this (e.g. phone is locked/idle).
-        try {
+        // Phone in use and unlocked: an incoming call stays in the notification (heads-up with
+        // Answer / Decline) and never takes over the screen. Otherwise open our call screen right
+        // away; for incoming calls the full-screen notification is the backup if the system blocks it.
+        val quietIncoming = call.state == Call.STATE_RINGING && deviceUnlocked()
+        if (!quietIncoming) try {
             startActivity(Intent(this, InCallActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (e: Exception) { }
     }
@@ -88,6 +92,12 @@ class CallService : InCallService() {
         CallManager.setAudio(audioState)
         onCallsChanged() // keep Mute / Speaker labels in the notification in sync
     }
+
+    /** True while the screen is on and the phone is unlocked (i.e. the person is using it). */
+    private fun deviceUnlocked(): Boolean = try {
+        getSystemService(PowerManager::class.java).isInteractive &&
+            !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+    } catch (e: Exception) { false }
 
     /** Re-posts the call notification. Kept public so receivers/other code can call it. */
     fun refreshNotification() = onCallsChanged()
@@ -140,7 +150,10 @@ class CallService : InCallService() {
             .setContentIntent(open)
 
         if (ringing) {
-            val answer = PendingIntent.getActivity(
+            val unlocked = deviceUnlocked()
+            // Unlocked: Answer just answers and the call carries on in the notification.
+            // Locked: Answer opens the call screen over the lock screen.
+            val answer = if (unlocked) actionIntent(12, CallActionReceiver.ANSWER) else PendingIntent.getActivity(
                 this, 12,
                 Intent(this, InCallActivity::class.java).putExtra(EXTRA_ANSWER, true),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -154,7 +167,7 @@ class CallService : InCallService() {
             b.setCustomContentView(v)
                 .setCustomHeadsUpContentView(v)
                 .setShowWhen(false)
-                .setFullScreenIntent(open, true)
+            if (!unlocked) b.setFullScreenIntent(open, true)
         } else {
             // Plain custom view on the system notification surface: name + timer on the left,
             // Mute / Speaker / Hang up on the right. No big view, so no expand arrow.
