@@ -150,10 +150,10 @@ class CallService : InCallService() {
             v.setTextViewText(R.id.inc_sub, regionLabel(CallManager.rawNumber(call)).ifBlank { "mobile" })
             v.setOnClickPendingIntent(R.id.inc_decline, hangup)
             v.setOnClickPendingIntent(R.id.inc_accept, answer)
-            b.setStyle(NotificationCompat.DecoratedCustomViewStyle())
-                .setCustomContentView(v)
-                .setCustomBigContentView(v)
+            // Plain custom view on the system surface; no big view, so no expand arrow.
+            b.setCustomContentView(v)
                 .setCustomHeadsUpContentView(v)
+                .setShowWhen(false)
                 .setFullScreenIntent(open, true)
         } else {
             // Plain custom view on the system notification surface: name + timer on the left,
