@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -286,3 +287,4 @@ private fun Thumb(label: String, selected: Boolean, onClick: () -> Unit, content
         Text(label, color = if (selected) Pal.Ink else Pal.Gray, fontSize = 11.sp, maxLines = 1)
     }
 }
+
