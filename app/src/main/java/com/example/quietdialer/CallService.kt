@@ -169,22 +169,12 @@ class CallService : InCallService() {
                 .setShowWhen(false)
             if (!unlocked) b.setFullScreenIntent(open, true)
         } else {
-            // The system's own call notification (CallStyle), so phones with call "islands" / live
-            // alerts (e.g. Origin Island) can show and control it natively. Name + running timer,
-            // Mute / Speaker as actions and a Hang up button.
+            // Plain custom view on the system notification surface: name + timer on the left,
+            // Mute / Speaker / Hang up on the right. No big view, so no expand arrow.
+            val view = buildOngoingView(call, hangup)
+            b.setCustomContentView(view).setShowWhen(false)
             val t = call.details.connectTimeMillis
-            val active = t > 0 && call.state == Call.STATE_ACTIVE
-            val muted = CallManager.isMuted()
-            val speaker = CallManager.isSpeaker()
-            b.setStyle(NotificationCompat.CallStyle.forOngoingCall(person, hangup))
-                .addAction(R.drawable.notif_ic_mic_white, if (muted) "Unmute" else "Mute", actionIntent(13, CallActionReceiver.MUTE))
-                .addAction(R.drawable.notif_ic_speaker_white, if (speaker) "Speaker off" else "Speaker", actionIntent(14, CallActionReceiver.SPEAKER))
-            if (active) {
-                b.setUsesChronometer(true).setShowWhen(true).setWhen(t)
-            } else {
-                b.setShowWhen(false)
-                    .setContentText(if (call.state == Call.STATE_HOLDING) "On hold" else "Calling…")
-            }
+            if (t > 0) b.setWhen(t)
         }
         // If the user manages to dismiss it anyway, put it straight back.
         b.setDeleteIntent(actionIntent(15, CallActionReceiver.REPOST))
