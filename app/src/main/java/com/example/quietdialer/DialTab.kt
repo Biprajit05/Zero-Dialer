@@ -134,12 +134,11 @@ fun DialTab(
     // Every change of the search text starts again from the top of the results.
     LaunchedEffect(query) { searchState.scrollToItem(0) }
 
-    // Keyboard handling for the search: a downward swipe while it is open closes the whole search.
+    // Keyboard handling for the search: a downward swipe while it is open closes the keyboard (search text stays).
     val view = LocalView.current
     val focusManager = LocalFocusManager.current
     val imeOpenState = rememberUpdatedState(WindowInsets.ime.getBottom(LocalDensity.current) > 0)
     fun closeSearch() {
-        searching = false; query = ""
         focusManager.clearFocus()
         ctx.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(view.windowToken, 0)
     }
