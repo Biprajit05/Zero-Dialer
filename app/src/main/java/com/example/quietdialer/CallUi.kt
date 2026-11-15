@@ -64,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -171,10 +172,14 @@ private fun IncomingContent(c: CallSnap, onAnswer: () -> Unit, onDecline: () -> 
             },
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                c.title, style = Glow, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
-            )
+            if (c.name.isNullOrBlank() && !c.isConference) {
+                FitTitle(c.title, 44.sp, FontWeight.Medium)
+            } else {
+                Text(
+                    c.title, style = Glow, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
+                )
+            }
             Text("Incoming call...", color = Color.White.copy(alpha = 0.8f), fontSize = 24.sp, modifier = Modifier.padding(top = 6.dp))
             Text(
                 c.subtitle ?: regionLabel(c.number).ifBlank { "mobile" },
@@ -230,6 +235,7 @@ private fun OngoingContent(
     var typed by remember { mutableStateOf("") }
 
     val onHoldNow = c.state == Call.STATE_HOLDING
+    val fitTitle = c.name.isNullOrBlank() && !c.isConference
     val live = c.state == Call.STATE_ACTIVE || onHoldNow
     val label = when (c.state) {
         Call.STATE_DIALING, Call.STATE_CONNECTING -> "Calling..."
@@ -247,7 +253,7 @@ private fun OngoingContent(
         when {
             showPad -> {
                 Spacer(Modifier.height(24.dp))
-                CallHeader(c.title, label, timer, c.hd, recording, big = false)
+                CallHeader(c.title, label, timer, c.hd, recording, big = false, fit = fitTitle)
                 Spacer(Modifier.height(8.dp))
                 Text(typed, color = Color.White, fontSize = 28.sp, maxLines = 1)
             }
@@ -276,7 +282,7 @@ private fun OngoingContent(
                 CallHeader(
                     c.title,
                     if (c.isConference && c.participants.isNotEmpty()) "${c.participants.size} Participants" else label,
-                    timer, c.hd, recording, big = true
+                    timer, c.hd, recording, big = true, fit = fitTitle
                 )
                 if (c.isConference && c.participants.isNotEmpty()) {
                     Spacer(Modifier.height(36.dp))
@@ -305,17 +311,21 @@ private fun OngoingContent(
 }
 
 @Composable
-private fun CallHeader(title: String, label: String, timer: String?, hd: Boolean, recording: Boolean, big: Boolean) {
+private fun CallHeader(title: String, label: String, timer: String?, hd: Boolean, recording: Boolean, big: Boolean, fit: Boolean = false) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            title, style = Glow, color = Color.White, fontSize = if (big) 40.sp else 28.sp, fontWeight = FontWeight.SemiBold,
-            textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
-        )
+        if (fit) {
+            FitTitle(title, if (big) 40.sp else 28.sp, FontWeight.SemiBold)
+        } else {
+            Text(
+                title, style = Glow, color = Color.White, fontSize = if (big) 40.sp else 28.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis
+            )
+        }
         if (label.isNotEmpty()) {
             Text(label, color = Color.White.copy(alpha = 0.8f), fontSize = if (big) 22.sp else 18.sp, modifier = Modifier.padding(top = 4.dp))
         }
         if (timer != null) {
-            Row(Modifier.padding(top = if (big) 14.dp else 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(top = if (big) 10.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (hd) {
                     Box(
                         Modifier.border(1.5.dp, Color.White.copy(alpha = 0.85f), RoundedCornerShape(5.dp))
@@ -323,7 +333,7 @@ private fun CallHeader(title: String, label: String, timer: String?, hd: Boolean
                     ) { Text("HD", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold) }
                     Spacer(Modifier.width(10.dp))
                 }
-                Text(timer, color = Color.White, fontSize = if (big) 38.sp else 26.sp)
+                Text(timer, color = Color.White.copy(alpha = 0.9f), fontSize = if (big) 24.sp else 18.sp)
             }
         }
         if (recording) {
@@ -464,9 +474,9 @@ private fun RoundAction(
         Box(
             Modifier.size(72.dp)
                 .bounceClick(shape = CircleShape, pressedScale = 0.88f, enabled = enabled, onClick = onClick)
-                .glass(CircleShape, if (active) 0.22f else 0f),
+                .glass(CircleShape, if (active) 0.38f else 0f),
             contentAlignment = Alignment.Center
-        ) { Icon(icon, label, modifier = Modifier.size(30.dp), tint = Color.White) }
+        ) { Icon(icon, label, modifier = Modifier.size(30.dp), tint = if (active) Color(0xFF1F1F1F) else Color.White) }
         Spacer(Modifier.height(8.dp))
         Text(label, color = Color.White.copy(alpha = 0.95f), fontSize = 14.sp, maxLines = 1)
     }
@@ -522,4 +532,16 @@ private fun InCallKeypad(onKey: (Char, Boolean) -> Unit, onHide: () -> Unit, onE
             Spacer(Modifier.width(92.dp))
         }
     }
+}
+
+/** One-line title that shrinks until it fits. Used when the title is just a phone number. */
+@Composable
+internal fun FitTitle(text: String, size: TextUnit, weight: FontWeight, modifier: Modifier = Modifier) {
+    var current by remember(text, size) { mutableStateOf(size) }
+    Text(
+        text, style = Glow, color = Color.White, fontSize = current, fontWeight = weight,
+        textAlign = TextAlign.Center, maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
+        modifier = modifier,
+        onTextLayout = { r -> if (r.didOverflowWidth && current.value > 18f) current = (current.value * 0.92f).sp }
+    )
 }

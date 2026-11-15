@@ -172,7 +172,8 @@ fun FakeCallScreen(name: String, number: String, onAnswer: () -> Unit, onEnd: ()
                     Modifier.graphicsLayer { alpha = head; translationY = -28.dp.toPx() * (1f - head) },
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(title, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (name.isBlank()) FitTitle(title, 44.sp, FontWeight.Medium)
+                    else Text(title, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("Incoming call...", color = Color.White.copy(alpha = 0.8f), fontSize = 24.sp, modifier = Modifier.padding(top = 6.dp))
                     if (name.isNotBlank() && number.isNotBlank()) {
                         Text(number, color = Color.White, fontSize = 26.sp, modifier = Modifier.padding(top = 10.dp))
@@ -196,9 +197,10 @@ fun FakeCallScreen(name: String, number: String, onAnswer: () -> Unit, onEnd: ()
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.height(72.dp))
-                Text(title, color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (name.isBlank()) FitTitle(title, 40.sp, FontWeight.SemiBold)
+                else Text(title, color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("Ongoing Call", color = Color.White.copy(alpha = 0.8f), fontSize = 22.sp, modifier = Modifier.padding(top = 4.dp))
-                Text("%02d:%02d".format(seconds / 60, seconds % 60), color = Color.White, fontSize = 38.sp, modifier = Modifier.padding(top = 14.dp))
+                Text("%02d:%02d".format(seconds / 60, seconds % 60), color = Color.White, fontSize = 24.sp, modifier = Modifier.padding(top = 10.dp))
                 Spacer(Modifier.weight(1f))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     FakeBtn("Mute", if (muted) Icons.Default.MicOff else Icons.Default.Mic, muted) { muted = !muted }
@@ -221,9 +223,9 @@ fun FakeCallScreen(name: String, number: String, onAnswer: () -> Unit, onEnd: ()
 private fun FakeBtn(label: String, icon: ImageVector, active: Boolean, onClick: () -> Unit) {
     Column(Modifier.width(92.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
-            Modifier.size(72.dp).bounceClick(shape = CircleShape, pressedScale = 0.88f, onClick = onClick).glass(CircleShape, if (active) 0.22f else 0f),
+            Modifier.size(72.dp).bounceClick(shape = CircleShape, pressedScale = 0.88f, onClick = onClick).glass(CircleShape, if (active) 0.38f else 0f),
             contentAlignment = Alignment.Center
-        ) { Icon(icon, label, tint = Color.White, modifier = Modifier.size(30.dp)) }
+        ) { Icon(icon, label, tint = if (active) Color(0xFF1F1F1F) else Color.White, modifier = Modifier.size(30.dp)) }
         Spacer(Modifier.height(8.dp))
         Text(label, color = Color.White.copy(alpha = 0.95f), fontSize = 14.sp)
     }
