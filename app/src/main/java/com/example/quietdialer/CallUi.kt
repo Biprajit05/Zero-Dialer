@@ -2,6 +2,15 @@ package com.example.quietdialer
 
 import android.telecom.Call
 import androidx.compose.animation.core.FastOutSlowInEasing
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.filled.Backspace
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -235,6 +244,11 @@ private fun OngoingContent(
 ) {
     val enter by rememberEntrance(0, 450)
     var showPad by remember { mutableStateOf(false) }
+    var typed by remember { mutableStateOf("") }
+    // Clear the typed digits once the keypad has finished closing (re-opening cancels this).
+    LaunchedEffect(showPad) {
+        if (!showPad) { delay(380); typed = "" }
+    }
 
     val onHoldNow = c.state == Call.STATE_HOLDING
     val fitTitle = c.name.isNullOrBlank() && !c.isConference
@@ -293,7 +307,10 @@ private fun OngoingContent(
             live, onHoldNow, c.canHold, muted, speaker, recording, showPad,
             onVideo, onAddCall, onMessages, onMute, onHold, onRecord, onSpeaker,
             onTogglePad = { showPad = !showPad }, onEnd = onEnd,
-            onKey = onDtmf
+            typed = typed,
+            onBackspace = { typed = typed.dropLast(1) },
+            onClearTyped = { typed = "" },
+            onKey = { ch, down -> if (down && typed.length < 32) typed += ch; onDtmf(ch, down) }
         )
         Spacer(Modifier.height(32.dp))
     }
@@ -416,7 +433,8 @@ internal fun GlassPill(text: String, icon: ImageVector?, enabled: Boolean, modif
 
 private val KEY_SIZE = 72.dp
 private val KEY_GAP = 14.dp
-private val PAD_AREA = KEY_SIZE * 4 + KEY_GAP * 3
+private val DIGITS_H = 60.dp
+private val PAD_AREA = KEY_SIZE * 4 + KEY_GAP * 3 + DIGITS_H
 
 /**
  * The button area. The six round buttons and the keypad share one spot and cross-fade with a
@@ -441,6 +459,9 @@ private fun ControlGrid(
     onSpeaker: () -> Unit,
     onTogglePad: () -> Unit,
     onEnd: () -> Unit,
+    typed: String,
+    onBackspace: () -> Unit,
+    onClearTyped: () -> Unit,
     onKey: (Char, Boolean) -> Unit
 ) {
     val p by animateFloatAsState(
@@ -472,11 +493,14 @@ private fun ControlGrid(
             }
             if (p > 0.01f) {
                 Box(
-                    Modifier.fillMaxWidth().graphicsLayer {
+                    Modifier.fillMaxSize().graphicsLayer {
                         alpha = ((p - 0.15f) / 0.85f).coerceIn(0f, 1f)
                         translationY = 48.dp.toPx() * (1f - p)
                     }
-                ) { InCallKeypad(onKey) }
+                ) {
+                    TypedDigits(typed, onBackspace, onClearTyped, Modifier.align(Alignment.TopCenter))
+                    Box(Modifier.align(Alignment.BottomCenter)) { InCallKeypad(onKey) }
+                }
             }
         }
         Spacer(Modifier.height(22.dp))
@@ -527,21 +551,81 @@ private fun InCallKeypad(onKey: (Char, Boolean) -> Unit) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(KEY_GAP)) {
         listOf("123", "456", "789", "*0#").forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                row.forEach { ch ->
-                    Box(
-                        Modifier.size(KEY_SIZE).glass(CircleShape)
-                            .pointerInput(ch) {
-                                detectTapGestures(onPress = {
-                                    onKey(ch, true)
-                                    tryAwaitRelease()
-                                    onKey(ch, false)
-                                })
-                            },
-                        contentAlignment = Alignment.Center
-                    ) { Text(ch.toString(), color = Color.White, fontSize = 28.sp) }
-                }
+                row.forEach { ch -> PadKey(ch, onKey) }
             }
         }
+    }
+}
+
+/**
+ * One keypad key. Pressing turns it frosted white at once (the same look as a switched-on button
+ * such as Mute) and the number goes dark; on release it fades back to plain glass. It stays lit
+ * for a short minimum time so very quick taps still show the flash.
+ */
+@Composable
+private fun PadKey(ch: Char, onKey: (Char, Boolean) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val job = remember { arrayOfNulls<Job>(1) }
+    var lit by remember { mutableStateOf(false) }
+    val boost by animateFloatAsState(
+        targetValue = if (lit) 0.38f else 0f,
+        animationSpec = if (lit) tween(60) else tween(380),
+        label = "keyBoost"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (lit) 0.92f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+        label = "keyScale"
+    )
+    Box(
+        Modifier.size(KEY_SIZE)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .glass(CircleShape, boost)
+            .pointerInput(ch) {
+                detectTapGestures(onPress = {
+                    job[0]?.cancel()
+                    lit = true
+                    onKey(ch, true)
+                    tryAwaitRelease()
+                    onKey(ch, false)
+                    job[0] = scope.launch { delay(110); lit = false }
+                })
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(ch.toString(), color = lerp(Color.White, Color(0xFF1F1F1F), (boost / 0.38f).coerceIn(0f, 1f)), fontSize = 28.sp)
+    }
+}
+
+/** The number typed so far, shown above the keypad, with a backspace button (hold to clear). */
+@Composable
+private fun TypedDigits(typed: String, onBackspace: () -> Unit, onClear: () -> Unit, modifier: Modifier = Modifier) {
+    val has = typed.isNotEmpty()
+    val show by animateFloatAsState(if (has) 1f else 0f, tween(220), label = "digitsShow")
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(typed) {
+        if (typed.isNotEmpty()) {
+            pop.snapTo(0.9f)
+            pop.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
+        }
+    }
+    Box(modifier.fillMaxWidth().height(DIGITS_H), contentAlignment = Alignment.Center) {
+        Text(
+            typed,
+            color = Color.White, style = Glow,
+            fontSize = (34f * minOf(1f, 11f / maxOf(typed.length, 1))).coerceAtLeast(18f).sp,
+            maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
+            modifier = Modifier.padding(horizontal = 56.dp).graphicsLayer {
+                alpha = show
+                scaleX = pop.value; scaleY = pop.value
+            }
+        )
+        Box(
+            Modifier.align(Alignment.CenterEnd).size(48.dp)
+                .graphicsLayer { alpha = show }
+                .bounceClick(shape = CircleShape, pressedScale = 0.85f, enabled = has, onLongClick = onClear, onClick = onBackspace),
+            contentAlignment = Alignment.Center
+        ) { Icon(Icons.Default.Backspace, "Delete", tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(26.dp)) }
     }
 }
 
