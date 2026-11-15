@@ -2,13 +2,13 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="@drawable/notif_pill"
+    android:background="@drawable/notif_pill_black"
     android:gravity="center_vertical"
     android:orientation="horizontal"
-    android:paddingStart="16dp"
-    android:paddingTop="4dp"
-    android:paddingEnd="6dp"
-    android:paddingBottom="4dp">
+    android:paddingStart="22dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="12dp">
 
     <LinearLayout
         android:layout_width="0dp"
@@ -22,55 +22,54 @@
             android:layout_height="wrap_content"
             android:ellipsize="end"
             android:singleLine="true"
-            android:textColor="#000000"
-            android:textSize="17sp" />
+            android:textColor="#FFFFFF"
+            android:textSize="19sp"
+            android:textStyle="bold" />
 
         <Chronometer
             android:id="@+id/notif_timer"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="#000000"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textColor="#8E8E93"
+            android:textSize="15sp" />
 
         <TextView
             android:id="@+id/notif_status"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Calling…"
-            android:textColor="#000000"
-            android:textSize="14sp"
-            android:textStyle="bold"
+            android:textColor="#8E8E93"
+            android:textSize="15sp"
             android:visibility="gone" />
     </LinearLayout>
 
     <ImageView
         android:id="@+id/notif_mute"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginStart="6dp"
         android:background="@drawable/notif_btn_gray"
         android:contentDescription="Mute"
-        android:padding="9dp"
-        android:src="@drawable/notif_ic_mic_dark" />
+        android:padding="12dp"
+        android:src="@drawable/notif_ic_mic_white" />
 
     <ImageView
         android:id="@+id/notif_speaker"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginStart="8dp"
         android:background="@drawable/notif_btn_gray"
         android:contentDescription="Speaker"
-        android:padding="9dp"
-        android:src="@drawable/notif_ic_speaker_dark" />
+        android:padding="12dp"
+        android:src="@drawable/notif_ic_speaker_white" />
 
     <ImageView
         android:id="@+id/notif_end"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:layout_marginStart="8dp"
         android:background="@drawable/notif_btn_red"
         android:contentDescription="Hang up"
-        android:padding="9dp"
+        android:padding="12dp"
         android:src="@drawable/notif_ic_end" />
 </LinearLayout>
