@@ -8,36 +8,46 @@ import android.provider.CallLog
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.CallMade
+import androidx.compose.material.icons.filled.CallMissed
+import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,16 +61,6 @@ private val KEYS = listOf(
     listOf("*" to "", "0" to "+", "#" to "")
 )
 
-private val BackspaceShape = GenericShape { size, _ ->
-    val tip = size.height * 0.5f
-    moveTo(tip, 0f)
-    lineTo(size.width, 0f)
-    lineTo(size.width, size.height)
-    lineTo(tip, size.height)
-    lineTo(0f, size.height / 2f)
-    close()
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DialTab(
@@ -68,7 +68,9 @@ fun DialTab(
     onNumber: (String) -> Unit,
     contacts: List<Contact>,
     permsVersion: Int,
-    onRequestPerms: () -> Unit
+    onRequestPerms: () -> Unit,
+    onNewContact: (String) -> Unit,
+    onBarHidden: (Boolean) -> Unit
 ) {
     val ctx = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -83,9 +85,18 @@ fun DialTab(
     var padVisible by rememberSaveable { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<LogEntry?>(null) }
 
+    val listState = rememberLazyListState()
+    val collapsed by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 30 }
+    }
+
     val canRead = remember(permsVersion) { hasPerm(ctx, Manifest.permission.READ_CALL_LOG) }
+
+    LaunchedEffect(selecting) { onBarHidden(selecting) }
+    DisposableEffect(Unit) { onDispose { onBarHidden(false) } }
 
     // Refresh the list whenever the system call log changes (e.g. right after a call ends).
     DisposableEffect(Unit) {
@@ -140,50 +151,52 @@ fun DialTab(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(Pal.Bg)) {
         // ---------- header ----------
         if (selecting) {
-            Header(if (selected.isEmpty()) "Select items" else "${selected.size} selected") {
-                TextButton(onClick = {
+            SelectionHeader(
+                count = selected.size, total = shown.size,
+                onToggleAll = {
                     selected = if (selected.size == shown.size) emptySet() else shown.map { it.id }.toSet()
-                }) { Text(if (selected.size == shown.size && shown.isNotEmpty()) "None" else "All") }
-                HeaderIcon(onClick = {
-                    deleteLogEntries(ctx, selected)
-                    selecting = false; selected = emptySet(); reload.intValue++
-                }) { Icon(Icons.Default.Delete, "Delete", tint = if (selected.isEmpty()) Pal.ChipBg else Pal.Missed) }
-                HeaderIcon(onClick = { selecting = false; selected = emptySet() }) {
-                    Icon(Icons.Default.Close, "Cancel", tint = Pal.Ink)
-                }
-            }
+                },
+                onCancel = { selecting = false; selected = emptySet() }
+            )
         } else {
-            Header("Dial") {
-                HeaderIcon(onClick = { selecting = true; searching = false; query = "" }) { SelectGlyph() }
+            CollapsingHeader("Dial", collapsed) {
+                HeaderIcon(onClick = { selecting = true; searching = false; query = "" }) { SelectIcon() }
                 HeaderIcon(onClick = { searching = !searching; if (!searching) query = "" }) {
-                    Icon(Icons.Default.Search, "Search", tint = Pal.Ink, modifier = Modifier.size(28.dp))
+                    Icon(Icons.Outlined.Search, "Search", tint = Pal.Ink, modifier = Modifier.size(24.dp))
                 }
                 Box {
                     HeaderIcon(onClick = { menuOpen = true }) {
-                        Icon(Icons.Default.MoreVert, "More", tint = Pal.Ink, modifier = Modifier.size(28.dp))
+                        Icon(Icons.Default.MoreVert, "More", tint = Pal.Ink, modifier = Modifier.size(24.dp))
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenu(
+                        expanded = menuOpen, onDismissRequest = { menuOpen = false },
+                        modifier = Modifier.background(Pal.Sheet)
+                    ) {
                         DropdownMenuItem(
-                            text = { Text(if (missedOnly) "Show all calls" else "Show missed calls only") },
-                            onClick = { missedOnly = !missedOnly; menuOpen = false }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Clear call log") },
+                            text = { Text("Clear call log", color = Pal.Ink) },
                             onClick = { menuOpen = false; confirmClear = true }
                         )
                     }
                 }
             }
-            if (searching) SearchField(query, { query = it }, { searching = false; query = "" }, "Search calls")
+            AnimatedVisibility(visible = searching) {
+                SearchPill(query, { query = it }, "Search calls", autoFocus = true, onClose = { searching = false; query = "" })
+            }
+            // The All / Missed switch slides in once the list is scrolled (and stays while Missed is on).
+            AnimatedVisibility(
+                visible = (collapsed || missedOnly) && !searching,
+                enter = fadeIn(tween(180)) + expandVertically(tween(180)),
+                exit = fadeOut(tween(150)) + shrinkVertically(tween(150))
+            ) { FilterPill(missedOnly) { missedOnly = it } }
         }
 
         // ---------- list area ----------
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when {
-                number.isNotEmpty() && !selecting -> Suggestions(number, contacts) {
+                number.isNotEmpty() && !selecting -> Suggestions(number, contacts, onNewContact) {
                     placeCall(ctx, it); onNumber("")
                 }
                 !canRead -> PermissionPrompt("Allow call log access to see your recent calls.", onRequestPerms)
@@ -192,7 +205,7 @@ fun DialTab(
                     if (missedOnly) "No missed calls" else "No recent calls",
                     Modifier.align(Alignment.Center), color = Pal.Gray
                 )
-                else -> LazyColumn(Modifier.fillMaxSize()) {
+                else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                     items(shown, key = { it.id }) { e ->
                         val nm = nameFor(e, nameMap)
                         RecentRow(
@@ -211,82 +224,42 @@ fun DialTab(
                             onInfo = { detail = e }
                         )
                     }
+                    item { Spacer(Modifier.height(80.dp)) }
                 }
+            }
+
+            // Small floating button that brings the keypad back.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !padVisible && !selecting && !searching,
+                modifier = Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 14.dp),
+                enter = fadeIn(tween(200)) + scaleIn(tween(200)),
+                exit = fadeOut(tween(150)) + scaleOut(tween(150))
+            ) {
+                Box(
+                    Modifier.size(54.dp).clip(RoundedCornerShape(16.dp)).background(Color(0xFF1E1E20))
+                        .border(1.dp, Pal.Chip, RoundedCornerShape(16.dp)).clickable { padVisible = true },
+                    contentAlignment = Alignment.Center
+                ) { DotsGlyph() }
             }
         }
 
-        // ---------- keypad ----------
-        if (!selecting && !searching) {
-            HorizontalDivider(color = Pal.Divider)
-            AnimatedVisibility(visible = padVisible) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp)) {
-                    KEYS.forEach { row ->
-                        Row(Modifier.fillMaxWidth()) {
-                            row.forEach { (d, letters) ->
-                                Box(
-                                    Modifier.weight(1f).height(80.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Box(
-                                        Modifier.size(72.dp).clip(CircleShape).background(Pal.Key)
-                                            .combinedClickable(
-                                                onClick = { key(d) },
-                                                onLongClick = if (d == "0") ({ key("+") }) else null
-                                            ),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
-                                        ) {
-                                            Text(
-                                                d, fontSize = if (d == "*" || d == "#") 32.sp else 30.sp,
-                                                color = Pal.Ink, lineHeight = 32.sp
-                                            )
-                                            if (d == "1") VoicemailGlyph()
-                                            else if (letters.isNotEmpty()) Text(
-                                                letters, fontSize = 10.sp, color = Pal.Ink,
-                                                fontWeight = FontWeight.Bold, lineHeight = 11.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
+        // ---------- keypad / delete bar ----------
+        if (selecting) {
+            DeleteBar(enabled = selected.isNotEmpty()) { confirmDelete = true }
+        } else {
+            AnimatedVisibility(
+                visible = padVisible && !searching,
+                enter = slideInVertically(tween(240)) { it } + fadeIn(tween(240)),
+                exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150))
             ) {
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    HeaderIcon(onClick = { padVisible = !padVisible }) { DotsGlyph() }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(72.dp).clip(CircleShape).background(Pal.Green)
-                            .clickable { call() },
-                        contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(32.dp)) }
-                }
-                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(width = 56.dp, height = 40.dp)
-                            .alpha(if (number.isNotEmpty()) 1f else 0.45f)
-                            .clip(BackspaceShape).background(Pal.BackspaceBg)
-                            .combinedClickable(
-                                onClick = { if (number.isNotEmpty()) onNumber(number.dropLast(1)) },
-                                onLongClick = { onNumber("") }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Close, "Delete digit", tint = Pal.BackspaceX,
-                            modifier = Modifier.size(20.dp).offset(x = 5.dp)
-                        )
-                    }
-                }
+                Keypad(
+                    number = number,
+                    onKey = { key(it) },
+                    onHide = { padVisible = false },
+                    onCall = { call() },
+                    onBackspace = { if (number.isNotEmpty()) onNumber(number.dropLast(1)) },
+                    onClear = { onNumber("") }
+                )
             }
         }
     }
@@ -300,17 +273,106 @@ fun DialTab(
         )
     }
 
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            containerColor = Color.White,
-            title = { Text("Clear call log?") },
-            text = { Text("All recent calls will be deleted.") },
-            confirmButton = {
-                TextButton(onClick = { clearCallLog(ctx); confirmClear = false; reload.intValue++ }) { Text("Clear") }
+    if (confirmDelete) {
+        ConfirmDialog(
+            text = "Are you sure you want to delete ${selected.size} call log?",
+            confirmLabel = "Delete",
+            onConfirm = {
+                deleteLogEntries(ctx, selected)
+                selecting = false; selected = emptySet(); confirmDelete = false; reload.intValue++
             },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } }
+            onDismiss = { confirmDelete = false }
         )
+    }
+
+    if (confirmClear) {
+        ConfirmDialog(
+            text = "Clear the whole call log?",
+            confirmLabel = "Clear",
+            onConfirm = { clearCallLog(ctx); confirmClear = false; reload.intValue++ },
+            onDismiss = { confirmClear = false }
+        )
+    }
+}
+
+@Composable
+private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
+    Box(Modifier.fillMaxWidth().padding(bottom = 6.dp), contentAlignment = Alignment.Center) {
+        Row(Modifier.clip(RoundedCornerShape(8.dp)).background(Pal.Chip)) {
+            listOf(false to "All", true to "Missed").forEach { (m, label) ->
+                val on = missedOnly == m
+                Box(
+                    Modifier.background(if (on) Pal.GreenDark else Color.Transparent)
+                        .clickable { onChange(m) }.padding(horizontal = 18.dp, vertical = 5.dp)
+                ) {
+                    Text(
+                        label, color = if (on) Pal.Green else Pal.Ink, fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Keypad(
+    number: String,
+    onKey: (String) -> Unit,
+    onHide: () -> Unit,
+    onCall: () -> Unit,
+    onBackspace: () -> Unit,
+    onClear: () -> Unit
+) {
+    Column(Modifier.fillMaxWidth().background(Pal.Bg).padding(horizontal = 24.dp)) {
+        KEYS.forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { (d, letters) ->
+                    Box(
+                        Modifier.weight(1f).height(60.dp).combinedClickable(
+                            onClick = { onKey(d) },
+                            onLongClick = if (d == "0") ({ onKey("+") }) else null
+                        ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Text(
+                                d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
+                                color = Pal.Ink, lineHeight = 30.sp
+                            )
+                            if (d == "1") VoicemailGlyph()
+                            else if (letters.isNotEmpty()) Text(
+                                letters, fontSize = 9.sp, color = Pal.Gray,
+                                fontWeight = FontWeight.Medium, lineHeight = 10.sp
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                HeaderIcon(onClick = onHide) { DotsGlyph() }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(60.dp).clip(CircleShape).background(Pal.Green).clickable(onClick = onCall),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(28.dp)) }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).combinedClickable(onClick = onBackspace, onLongClick = onClear),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Backspace, "Delete digit",
+                        tint = if (number.isNotEmpty()) Pal.Gray else Pal.Chip, modifier = Modifier.size(26.dp)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -327,74 +389,79 @@ private fun RecentRow(
     onInfo: () -> Unit
 ) {
     val missed = e.type == CallLog.Calls.MISSED_TYPE
+    val (icon, tint) = when (e.type) {
+        CallLog.Calls.MISSED_TYPE -> Icons.Default.CallMissed to Pal.Missed
+        CallLog.Calls.OUTGOING_TYPE -> Icons.Default.CallMade to Pal.Gray
+        CallLog.Calls.INCOMING_TYPE -> Icons.Default.CallReceived to Pal.Gray
+        else -> Icons.Default.CallMissed to Pal.Gray
+    }
+    val sub = if (showNumber) prettyNumber(e.number) else (e.location?.takeIf { it.isNotBlank() } ?: "Unknown location")
     Column {
         Row(
             Modifier.fillMaxWidth()
                 .combinedClickable(onClick = onClick, onLongClick = onLong)
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                .padding(start = 14.dp, end = 12.dp, top = 11.dp, bottom = 11.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterStart) {
-                if (selecting) SelectDot(checked)
-                else if (e.type == CallLog.Calls.OUTGOING_TYPE) OutgoingGlyph()
-            }
+            if (selecting) { SelectCircle(checked); Spacer(Modifier.width(12.dp)) }
+            Icon(icon, null, tint = tint, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    title, fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (missed) Pal.Missed else Pal.Ink
                 )
-                if (e.isHd || e.isWifi || showNumber) {
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (e.isHd) { TagChip("HD"); Spacer(Modifier.width(6.dp)) }
-                        if (e.isWifi) { TagChip("Wi-Fi"); Spacer(Modifier.width(6.dp)) }
-                        if (showNumber) Text(
-                            prettyNumber(e.number), fontSize = 14.sp, color = Pal.Gray,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                Spacer(Modifier.height(3.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (e.isHd) { TagChip("HD"); Spacer(Modifier.width(4.dp)) }
+                    if (e.isWifi) { TagChip("Wi-Fi"); Spacer(Modifier.width(4.dp)) }
+                    Text(sub, fontSize = 13.sp, color = Pal.Gray, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Text(formatWhen(e.date), fontSize = 15.sp, color = Pal.Gray, maxLines = 1)
+            Text(formatWhen(e.date), fontSize = 13.sp, color = Pal.Gray, maxLines = 1)
             Spacer(Modifier.width(10.dp))
             Box(
-                Modifier.size(36.dp).clip(CircleShape).background(Pal.Soft).clickable(onClick = onInfo),
+                Modifier.size(28.dp).clip(CircleShape).background(Pal.Chip).clickable(onClick = onInfo),
                 contentAlignment = Alignment.Center
-            ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Ink) }
+            ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Gray, modifier = Modifier.size(20.dp)) }
         }
-        HorizontalDivider(Modifier.padding(start = 56.dp), color = Pal.Divider)
+        HorizontalDivider(Modifier.padding(start = 44.dp), color = Pal.Divider, thickness = 0.5.dp)
     }
 }
 
 /** Shown instead of recents while a number is being typed: matching contacts (smart dial). */
 @Composable
-private fun Suggestions(number: String, contacts: List<Contact>, onCall: (String) -> Unit) {
-    val ctx = LocalContext.current
+private fun Suggestions(
+    number: String,
+    contacts: List<Contact>,
+    onNewContact: (String) -> Unit,
+    onCall: (String) -> Unit
+) {
     val matches = remember(number, contacts) { contacts.filter { matchesDial(it, number) }.take(40) }
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 number, fontSize = if (number.length > 14) 24.sp else 32.sp, color = Pal.Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = { addContactIntent(ctx, number) }) { Text("Add contact") }
+            TextButton(onClick = { onNewContact(number) }) { Text("Add contact", color = Pal.Green) }
         }
-        HorizontalDivider(color = Pal.Divider)
+        HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
         LazyColumn(Modifier.fillMaxSize()) {
             items(matches, key = { "${it.id}:${numberKey(it.number)}" }) { c ->
                 Row(
-                    Modifier.fillMaxWidth().clickable { onCall(c.number) }.padding(horizontal = 24.dp, vertical = 10.dp),
+                    Modifier.fillMaxWidth().clickable { onCall(c.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Avatar(c.name, 44.dp)
+                    Avatar(c.name, 44.dp, c.id)
                     Spacer(Modifier.width(16.dp))
                     Column {
-                        Text(c.name, fontSize = 18.sp, color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(prettyNumber(c.number), fontSize = 14.sp, color = Pal.Gray)
+                        Text(c.name, fontSize = 17.sp, color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(prettyNumber(c.number), fontSize = 13.sp, color = Pal.Gray)
                     }
                 }
             }

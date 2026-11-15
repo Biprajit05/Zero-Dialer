@@ -24,7 +24,8 @@ data class LogEntry(
     val type: Int,
     val date: Long,
     val duration: Long,
-    val features: Int
+    val features: Int,
+    val location: String? = null
 ) {
     // CallLog.Calls.FEATURES bit flags
     val isHd get() = features and 0x4 != 0
@@ -51,7 +52,8 @@ fun loadLog(ctx: Context): List<LogEntry> {
     val out = mutableListOf<LogEntry>()
     val cols = arrayOf(
         CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.TYPE,
-        CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.FEATURES
+        CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.FEATURES,
+        CallLog.Calls.GEOCODED_LOCATION
     )
     try {
         ctx.contentResolver.query(CallLog.Calls.CONTENT_URI, cols, null, null, "${CallLog.Calls.DATE} DESC")
@@ -59,7 +61,7 @@ fun loadLog(ctx: Context): List<LogEntry> {
                 while (c.moveToNext() && out.size < 300) {
                     out += LogEntry(
                         c.getLong(0), c.getString(1) ?: "", c.getString(2),
-                        c.getInt(3), c.getLong(4), c.getLong(5), c.getInt(6)
+                        c.getInt(3), c.getLong(4), c.getLong(5), c.getInt(6), c.getString(7)
                     )
                 }
             }
@@ -194,4 +196,111 @@ fun matchesDial(c: Contact, typed: String): Boolean {
         return c.name.split(' ').any { t9(it).startsWith(typed) }
     }
     return false
+}
+
+/** "Today 2:01 AM", "Yesterday 9:10 PM", "3 Nov 8:00 AM". */
+fun formatLogTime(ts: Long): String {
+    val now = Calendar.getInstance()
+    val t = Calendar.getInstance().apply { timeInMillis = ts }
+    fun same(a: Calendar, b: Calendar) =
+        a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
+    val time = DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(ts))
+    if (same(now, t)) return "Today $time"
+    val y = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    if (same(y, t)) return "Yesterday $time"
+    val pattern = if (now.get(Calendar.YEAR) == t.get(Calendar.YEAR)) "d MMM" else "d MMM yyyy"
+    return SimpleDateFormat(pattern, Locale.getDefault()).format(Date(ts)) + " " + time
+}
+
+/** Right-hand status text of a call-log entry in the details screen. */
+fun statusLabel(e: LogEntry): String = when {
+    e.type == CallLog.Calls.MISSED_TYPE -> "Missed"
+    e.type == CallLog.Calls.REJECTED_TYPE -> "Declined"
+    e.duration > 0 -> formatDuration(e.duration)
+    else -> "Not connected"
+}
+
+fun copyNumber(ctx: Context, number: String) {
+    val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+    cm.setPrimaryClip(android.content.ClipData.newPlainText("number", number))
+    Toast.makeText(ctx, "Number copied", Toast.LENGTH_SHORT).show()
+}
+
+fun addToExistingIntent(ctx: Context, number: String) {
+    try {
+        ctx.startActivity(Intent(Intent.ACTION_INSERT_OR_EDIT).apply {
+            type = ContactsContract.Contacts.CONTENT_ITEM_TYPE
+            putExtra(ContactsContract.Intents.Insert.PHONE, number)
+        })
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "No contacts app found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun editContactIntent(ctx: Context, contactId: Long) {
+    try {
+        ctx.startActivity(
+            Intent(Intent.ACTION_EDIT, Uri.withAppendedPath(ContactsContract.Contacts.CONTENT_URI, contactId.toString()))
+        )
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "No contacts app found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+fun blockNumber(ctx: Context, number: String) {
+    try {
+        val v = android.content.ContentValues().apply {
+            put(android.provider.BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER, number)
+        }
+        ctx.contentResolver.insert(android.provider.BlockedNumberContract.BlockedNumbers.CONTENT_URI, v)
+        Toast.makeText(ctx, "Number blocked", Toast.LENGTH_SHORT).show()
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "Set Quiet Dialer as your default phone app to block numbers", Toast.LENGTH_LONG).show()
+    }
+}
+
+/** Marks / unmarks a contact as a favourite (needs WRITE_CONTACTS). */
+fun setStarred(ctx: Context, contactId: Long, starred: Boolean): Boolean = try {
+    val v = android.content.ContentValues().apply { put(ContactsContract.Contacts.STARRED, if (starred) 1 else 0) }
+    ctx.contentResolver.update(
+        android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, contactId), v, null, null
+    ) > 0
+} catch (e: Exception) {
+    Toast.makeText(ctx, "Contacts permission needed", Toast.LENGTH_SHORT).show(); false
+}
+
+fun deleteContacts(ctx: Context, ids: Set<Long>) {
+    try {
+        ids.forEach {
+            ctx.contentResolver.delete(
+                android.content.ContentUris.withAppendedId(ContactsContract.Contacts.CONTENT_URI, it), null, null
+            )
+        }
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "Contacts permission needed", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Saves a new contact on the phone. Returns false if it couldn't be written. */
+fun saveContact(ctx: Context, name: String, phone: String, email: String, company: String, title: String): Boolean {
+    val ops = ArrayList<android.content.ContentProviderOperation>()
+    ops += android.content.ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
+        .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
+        .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null).build()
+    fun row(mime: String) = android.content.ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+        .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+        .withValue(ContactsContract.Data.MIMETYPE, mime)
+    if (name.isNotBlank()) ops += row(ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
+        .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, name.trim()).build()
+    if (phone.isNotBlank()) ops += row(Phone.CONTENT_ITEM_TYPE)
+        .withValue(Phone.NUMBER, phone.trim()).withValue(Phone.TYPE, Phone.TYPE_MOBILE).build()
+    if (email.isNotBlank()) ops += row(ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)
+        .withValue(ContactsContract.CommonDataKinds.Email.ADDRESS, email.trim())
+        .withValue(ContactsContract.CommonDataKinds.Email.TYPE, ContactsContract.CommonDataKinds.Email.TYPE_HOME).build()
+    if (company.isNotBlank() || title.isNotBlank()) ops += row(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
+        .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, company.trim())
+        .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, title.trim()).build()
+    return try {
+        ctx.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops); true
+    } catch (e: Exception) { false }
 }

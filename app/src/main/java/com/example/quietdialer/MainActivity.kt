@@ -6,15 +6,24 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -42,15 +51,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
-            navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
         val initial = intent?.data?.schemeSpecificPart ?: ""
         setContent {
             MaterialTheme(
-                colorScheme = lightColorScheme(
+                colorScheme = darkColorScheme(
                     primary = Pal.Green, onPrimary = Color.White,
-                    background = Color.White, surface = Color.White
+                    background = Pal.Bg, onBackground = Color.White,
+                    surface = Pal.Sheet, onSurface = Color.White,
+                    onSurfaceVariant = Pal.Gray
                 )
             ) { App(initial, version.intValue, { askPermissions() }, { requestDialerRole() }) }
         }
@@ -67,7 +78,8 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.CALL_PHONE,
             Manifest.permission.READ_CALL_LOG,
             Manifest.permission.WRITE_CALL_LOG,
-            Manifest.permission.READ_CONTACTS
+            Manifest.permission.READ_CONTACTS,
+            Manifest.permission.WRITE_CONTACTS
         )
         if (Build.VERSION.SDK_INT >= 33) wanted += Manifest.permission.POST_NOTIFICATIONS
         val missing = wanted.filter { !hasPerm(this, it) }
@@ -82,14 +94,24 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Full-screen pages that slide over the tabs. */
+sealed interface Overlay {
+    data class Detail(val id: Long) : Overlay
+    data class NewContact(val number: String = "") : Overlay
+    object PickFavorite : Overlay
+}
+
 @Composable
 fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, onRequestRole: () -> Unit) {
     val ctx = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var number by rememberSaveable { mutableStateOf(initialNumber) }
     var contacts by remember { mutableStateOf<List<Contact>>(emptyList()) }
+    var contactsVersion by remember { mutableIntStateOf(0) }
+    var overlay by remember { mutableStateOf<Overlay?>(null) }
+    var barHidden by remember { mutableStateOf(false) }
 
-    LaunchedEffect(permsVersion) {
+    LaunchedEffect(permsVersion, contactsVersion) {
         contacts = if (hasPerm(ctx, Manifest.permission.READ_CONTACTS))
             withContext(Dispatchers.IO) { loadContacts(ctx) } else emptyList()
     }
@@ -99,26 +121,82 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
         !rm.isRoleAvailable(RoleManager.ROLE_DIALER) || rm.isRoleHeld(RoleManager.ROLE_DIALER)
     }
 
-    Column(Modifier.fillMaxSize().background(Color.White).statusBarsPadding().imePadding()) {
-        if (!isDefault) {
-            Row(
-                Modifier.fillMaxWidth().background(Color(0xFFFFF1CF)).padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
-                    fontSize = 13.sp, color = Color(0xFF1B1B1B), modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = onRequestRole) { Text("Set default") }
+    BackHandler(enabled = overlay != null) { overlay = null }
+
+    Box(Modifier.fillMaxSize().background(Pal.Bg)) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+            if (!isDefault) {
+                Row(
+                    Modifier.fillMaxWidth().background(Color(0xFF3A3220)).padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
+                        fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f)
+                    )
+                    TextButton(onClick = onRequestRole) { Text("Set default", color = Pal.Green) }
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                AnimatedContent(
+                    targetState = tab,
+                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(120)) },
+                    label = "tabs"
+                ) { t ->
+                    when (t) {
+                        0 -> DialTab(
+                            number, { number = it }, contacts, permsVersion, onRequestPerms,
+                            onNewContact = { overlay = Overlay.NewContact(it) },
+                            onBarHidden = { barHidden = it }
+                        )
+                        1 -> ContactsTab(
+                            contacts, permsVersion, onRequestPerms,
+                            onOpenContact = { overlay = Overlay.Detail(it.id) },
+                            onNewContact = { overlay = Overlay.NewContact() },
+                            onBarHidden = { barHidden = it },
+                            onChanged = { contactsVersion++ }
+                        )
+                        else -> FavoritesTab(
+                            contacts, permsVersion, onRequestPerms,
+                            onOpenContact = { overlay = Overlay.Detail(it.id) },
+                            onAddFavorite = { overlay = Overlay.PickFavorite }
+                        )
+                    }
+                }
+            }
+            AnimatedVisibility(visible = !barHidden) { BottomBar(tab) { tab = it } }
+        }
+
+        AnimatedContent(
+            targetState = overlay,
+            modifier = Modifier.fillMaxSize(),
+            transitionSpec = {
+                if (targetState != null)
+                    (slideInHorizontally(tween(260)) { it } + fadeIn(tween(200))) togetherWith fadeOut(tween(200))
+                else
+                    fadeIn(tween(200)) togetherWith (slideOutHorizontally(tween(240)) { it } + fadeOut(tween(200)))
+            },
+            label = "overlay"
+        ) { o ->
+            if (o == null) {
+                Box(Modifier.fillMaxSize())
+            } else {
+                Box(Modifier.fillMaxSize().background(Pal.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+                    when (o) {
+                        is Overlay.Detail -> ContactDetailScreen(
+                            o.id, contacts, onBack = { overlay = null }, onChanged = { contactsVersion++ }
+                        )
+                        is Overlay.NewContact -> NewContactScreen(
+                            o.number, onClose = { overlay = null },
+                            onSaved = { contactsVersion++; overlay = null }
+                        )
+                        Overlay.PickFavorite -> PickFavoriteScreen(
+                            contacts, onBack = { overlay = null },
+                            onPicked = { contactsVersion++; overlay = null }
+                        )
+                    }
+                }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (tab) {
-                0 -> DialTab(number, { number = it }, contacts, permsVersion, onRequestPerms)
-                1 -> ContactsTab(contacts, permsVersion, onRequestPerms)
-                else -> FavoritesTab(contacts, permsVersion, onRequestPerms)
-            }
-        }
-        BottomBar(tab) { tab = it }
     }
 }
