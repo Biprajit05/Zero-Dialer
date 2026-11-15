@@ -63,7 +63,7 @@ private sealed interface ListRow {
  * How well a contact fits the search text (lower is better, -1 = no match):
  * name starts with it, a word of the name starts with it, name contains it, number contains it.
  */
-private fun searchRank(c: Contact, q: String, qDigits: String): Int {
+internal fun searchRank(c: Contact, q: String, qDigits: String): Int {
     val name = c.name.lowercase()
     if (name.startsWith(q)) return 0
     val words = name.split(' ', '-', '.', '_').filter { it.isNotEmpty() }
@@ -82,6 +82,7 @@ fun ContactsTab(
     onRequestPerms: () -> Unit,
     onOpenContact: (Contact) -> Unit,
     onNewContact: () -> Unit,
+    onOpenGroups: () -> Unit,
     onBarHidden: (Boolean) -> Unit,
     onChanged: () -> Unit
 ) {
@@ -163,7 +164,7 @@ fun ContactsTab(
         }
     }
     val showLead = query.isBlank() && !selecting
-    val lead = if (showLead) 2 else 0
+    val lead = if (showLead) 1 else 0
     val letters = remember(rows) { rows.filterIsInstance<ListRow.Head>().map { it.letter } }
     val headIndex = remember(rows) {
         HashMap<Char, Int>().also { m -> rows.forEachIndexed { i, r -> if (r is ListRow.Head) m[r.letter] = i } }
@@ -224,23 +225,8 @@ fun ContactsTab(
                     contentPadding = PaddingValues(top = 6.dp, bottom = 120.dp)
                 ) {
                     if (showLead) {
-                        item(key = "profile") {
-                            LeadRow("Profile", Icons.Default.Person) {
-                                try {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, ContactsContract.Profile.CONTENT_URI))
-                                } catch (e: Exception) {
-                                    Toast.makeText(ctx, "No contacts app found", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
                         item(key = "groups") {
-                            LeadRow("Groups", Icons.Default.People) {
-                                try {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, ContactsContract.Groups.CONTENT_URI))
-                                } catch (e: Exception) {
-                                    Toast.makeText(ctx, "No contacts app found", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            LeadRow("Groups", Icons.Default.People) { onOpenGroups() }
                         }
                     }
                     items(

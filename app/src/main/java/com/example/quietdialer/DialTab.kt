@@ -72,6 +72,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +130,27 @@ fun DialTab(
     var confirmDelete by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+    val searchState = rememberLazyListState()
+    // Every change of the search text starts again from the top of the results.
+    LaunchedEffect(query) { searchState.scrollToItem(0) }
+
+    // Keyboard handling for the search: a downward swipe while it is open closes the whole search.
+    val view = LocalView.current
+    val focusManager = LocalFocusManager.current
+    val imeOpenState = rememberUpdatedState(WindowInsets.ime.getBottom(LocalDensity.current) > 0)
+    fun closeSearch() {
+        searching = false; query = ""
+        focusManager.clearFocus()
+        ctx.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+    val searchWatcher = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y > 0f && imeOpenState.value) closeSearch()
+                return Offset.Zero
+            }
+        }
+    }
     // Switching between All and Missed always starts from the top of the list.
     LaunchedEffect(missedOnly) { listState.scrollToItem(0) }
     val collapsed by remember {
@@ -221,6 +245,20 @@ fun DialTab(
             (!missedOnly || e.type == CallLog.Calls.MISSED_TYPE) &&
                 (query.isBlank() || nameFor(e, nameMap).contains(query, true) || e.number.contains(query))
         }.filter { seen.add(groupKey(it)) }
+    }
+
+    // Contacts that fit the search text (best match first, one row per contact).
+    val contactHits = remember(contacts, query) {
+        if (query.isBlank()) emptyList()
+        else {
+            val q = query.trim().lowercase()
+            val qd = digitsOf(query)
+            contacts.map { it to searchRank(it, q, qd) }
+                .filter { it.second >= 0 }
+                .sortedWith(compareBy({ it.second }, { it.first.name.lowercase() }))
+                .distinctBy { it.first.id }
+                .map { it.first }
+        }
     }
 
     BackHandler(enabled = selecting || searching) {
@@ -330,6 +368,65 @@ fun DialTab(
                 }
                 !canRead -> PermissionPrompt("Allow call log access to see your recent calls.", onRequestPerms)
                 all == null -> Text("Loading…", Modifier.align(Alignment.Center), color = Pal.Gray)
+                searching && query.isNotBlank() && !selecting -> LazyColumn(
+                    state = searchState, modifier = Modifier.fillMaxSize().nestedScroll(searchWatcher),
+                    contentPadding = PaddingValues(bottom = maxOf(120.dp, padSpace))
+                ) {
+                    if (shown.isNotEmpty()) {
+                        item(key = "hCalls") { SearchLabel("Recent calls") }
+                        items(shown, key = { "r${it.id}" }) { e ->
+                            val nm = nameFor(e, nameMap)
+                            RecentRow(
+                                e = e,
+                                missedCount = missedCounts[groupKey(e)] ?: 0,
+                                title = nm.ifBlank { if (isDialable(e.number)) prettyNumber(e.number) else "Unknown" },
+                                showNumber = nm.isNotBlank(),
+                                selecting = false,
+                                checked = false,
+                                onClick = { placeCall(ctx, e.number) },
+                                onLong = { selecting = true; searching = false; query = ""; selected = setOf(e.id) },
+                                onInfo = { onOpenInfo(e.number) },
+                                showCall = true,
+                                onCall = { placeCall(ctx, e.number) }
+                            )
+                        }
+                    }
+                    if (contactHits.isNotEmpty()) {
+                        item(key = "hContacts") {
+                            SearchLabel(if (contactHits.size == 1) "1 contact found" else "${contactHits.size} contacts found")
+                        }
+                        items(contactHits, key = { "c${it.id}" }) { c ->
+                            Column {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(horizontal = 8.dp)
+                                        .bounceClick(shape = RoundedCornerShape(16.dp), pressedScale = 0.98f) { onOpenInfo(c.number) }
+                                        .padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Avatar(c.name, 44.dp, c.id)
+                                    Spacer(Modifier.width(16.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            c.name, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Pal.Ink,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(prettyNumber(c.number), fontSize = 14.sp, color = Pal.Gray, maxLines = 1)
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    RoundIconButton(Icons.Default.Call, "Call") { placeCall(ctx, c.number) }
+                                }
+                                HorizontalDivider(Modifier.padding(start = 78.dp, end = 14.dp), color = Pal.Divider, thickness = 0.5.dp)
+                            }
+                        }
+                    }
+                    if (shown.isEmpty() && contactHits.isEmpty()) {
+                        item(key = "none") {
+                            Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.TopCenter) {
+                                Text("No matches", color = Pal.Gray)
+                            }
+                        }
+                    }
+                }
                 shown.isEmpty() -> Text(
                     if (missedOnly) "No missed calls" else "No recent calls",
                     Modifier.align(Alignment.Center), color = Pal.Gray
@@ -593,7 +690,9 @@ private fun RecentRow(
     checked: Boolean,
     onClick: () -> Unit,
     onLong: () -> Unit,
-    onInfo: () -> Unit
+    onInfo: () -> Unit,
+    showCall: Boolean = false,
+    onCall: () -> Unit = {}
 ) {
     val missed = e.type == CallLog.Calls.MISSED_TYPE
     val (icon, tint) = when (e.type) {
@@ -639,6 +738,10 @@ private fun RecentRow(
                     .background(Pal.Chip),
                 contentAlignment = Alignment.Center
             ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Ink, modifier = Modifier.size(22.dp)) }
+            if (showCall) {
+                Spacer(Modifier.width(8.dp))
+                RoundIconButton(Icons.Default.Call, "Call", size = 34.dp, onClick = onCall)
+            }
         }
         HorizontalDivider(Modifier.padding(start = 42.dp), color = Pal.Divider, thickness = 0.5.dp)
     }
@@ -741,5 +844,14 @@ private fun OptionRow(label: String, onClick: () -> Unit) {
     Text(
         label, color = Pal.Link, fontSize = 18.sp,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp)
+    )
+}
+
+/** Small grey heading above a group of search results ("Recent calls", "3 contacts found"). */
+@Composable
+private fun SearchLabel(text: String) {
+    Text(
+        text, color = Pal.Gray, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+        modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 6.dp)
     )
 }

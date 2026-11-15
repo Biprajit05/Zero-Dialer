@@ -123,7 +123,10 @@ class MainActivity : ComponentActivity() {
 
 /** Full-screen pages that slide over the tabs. */
 sealed interface Overlay {
-    data class Detail(val id: Long) : Overlay
+    data class Detail(val id: Long, val back: Overlay? = null) : Overlay
+    object Groups : Overlay
+    data class GroupDetail(val id: Long) : Overlay
+    data class GroupEdit(val id: Long) : Overlay   // id 0 = new group
     data class NewContact(val number: String = "") : Overlay
     data class Number(val number: String) : Overlay
     object PickFavorite : Overlay
@@ -139,6 +142,8 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
     var contactsVersion by remember { mutableIntStateOf(0) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
     var barHidden by remember { mutableStateOf(false) }
+    var groups by remember { mutableStateOf(GroupStore.load(ctx)) }
+    fun saveGroups(list: List<ContactGroup>) { groups = list; GroupStore.save(ctx, list) }
 
     LaunchedEffect(permsVersion, contactsVersion) {
         contacts = if (hasPerm(ctx, Manifest.permission.READ_CONTACTS))
@@ -150,7 +155,14 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
         !rm.isRoleAvailable(RoleManager.ROLE_DIALER) || rm.isRoleHeld(RoleManager.ROLE_DIALER)
     }
 
-    BackHandler(enabled = overlay != null) { overlay = null }
+    BackHandler(enabled = overlay != null) {
+        overlay = when (val o = overlay) {
+            is Overlay.Detail -> o.back
+            is Overlay.GroupDetail -> Overlay.Groups
+            is Overlay.GroupEdit -> if (o.id != 0L) Overlay.GroupDetail(o.id) else Overlay.Groups
+            else -> null
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(Pal.Bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -194,6 +206,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                             contacts, permsVersion, onRequestPerms,
                             onOpenContact = { overlay = Overlay.Detail(it.id) },
                             onNewContact = { overlay = Overlay.NewContact() },
+                            onOpenGroups = { overlay = Overlay.Groups },
                             onBarHidden = { barHidden = it },
                             onChanged = { contactsVersion++ }
                         )
@@ -242,7 +255,33 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                 Box(Modifier.fillMaxSize().background(Pal.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
                     when (o) {
                         is Overlay.Detail -> ContactDetailScreen(
-                            o.id, contacts, onBack = { overlay = null }, onChanged = { contactsVersion++ }
+                            o.id, contacts, onBack = { overlay = o.back }, onChanged = { contactsVersion++ }
+                        )
+                        Overlay.Groups -> GroupsScreen(
+                            groups, onBack = { overlay = null },
+                            onOpen = { overlay = Overlay.GroupDetail(it) },
+                            onNew = { overlay = Overlay.GroupEdit(0L) }
+                        )
+                        is Overlay.GroupDetail -> GroupDetailScreen(
+                            groups.firstOrNull { it.id == o.id }, contacts,
+                            onBack = { overlay = Overlay.Groups },
+                            onEdit = { overlay = Overlay.GroupEdit(o.id) },
+                            onDelete = { saveGroups(groups.filter { it.id != o.id }); overlay = Overlay.Groups },
+                            onOpenContact = { overlay = Overlay.Detail(it, back = o) }
+                        )
+                        is Overlay.GroupEdit -> GroupEditScreen(
+                            groups.firstOrNull { it.id == o.id }, contacts,
+                            onClose = { overlay = if (o.id != 0L) Overlay.GroupDetail(o.id) else Overlay.Groups },
+                            onSave = { name, members ->
+                                if (o.id == 0L) {
+                                    val g = ContactGroup(System.currentTimeMillis(), name, members)
+                                    saveGroups(groups + g)
+                                    overlay = Overlay.GroupDetail(g.id)
+                                } else {
+                                    saveGroups(groups.map { if (it.id == o.id) it.copy(name = name, members = members) else it })
+                                    overlay = Overlay.GroupDetail(o.id)
+                                }
+                            }
                         )
                         is Overlay.Number -> NumberDetailScreen(o.number, onBack = { overlay = null })
                         is Overlay.NewContact -> NewContactScreen(

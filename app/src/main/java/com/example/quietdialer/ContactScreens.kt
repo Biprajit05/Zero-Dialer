@@ -302,11 +302,11 @@ private fun RingtoneRow(contactId: Long) {
 }
 
 @Composable
-private fun RoundIconButton(icon: ImageVector, desc: String, tint: Color = Pal.Ink, onClick: () -> Unit) {
+fun RoundIconButton(icon: ImageVector, desc: String, tint: Color = Pal.Ink, size: androidx.compose.ui.unit.Dp = 40.dp, onClick: () -> Unit) {
     Box(
-        Modifier.size(40.dp).bounceClick(shape = CircleShape, pressedScale = 0.86f, onClick = onClick).background(Pal.Chip),
+        Modifier.size(size).bounceClick(shape = CircleShape, pressedScale = 0.86f, onClick = onClick).background(Pal.Chip),
         contentAlignment = Alignment.Center
-    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(20.dp)) }
+    ) { Icon(icon, desc, tint = tint, modifier = Modifier.size(size / 2)) }
 }
 
 // ---------------------------------------------------------------- new contact
