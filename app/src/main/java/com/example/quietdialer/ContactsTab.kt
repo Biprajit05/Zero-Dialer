@@ -33,7 +33,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
+import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +57,21 @@ import kotlinx.coroutines.withContext
 private sealed interface ListRow {
     data class Head(val letter: Char) : ListRow
     data class Item(val c: Contact) : ListRow
+}
+
+/**
+ * How well a contact fits the search text (lower is better, -1 = no match):
+ * name starts with it, a word of the name starts with it, name contains it, number contains it.
+ */
+private fun searchRank(c: Contact, q: String, qDigits: String): Int {
+    val name = c.name.lowercase()
+    if (name.startsWith(q)) return 0
+    val words = name.split(' ', '-', '.', '_').filter { it.isNotEmpty() }
+    val tokens = q.split(' ').filter { it.isNotEmpty() }
+    if (words.any { it.startsWith(q) } || (tokens.size > 1 && tokens.all { t -> words.any { it.startsWith(t) } })) return 1
+    if (name.contains(q)) return 2
+    if (qDigits.isNotEmpty() && digitsOf(c.number).contains(qDigits)) return 3
+    return -1
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -76,6 +99,32 @@ fun ContactsTab(
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 30 }
     }
 
+    // Typing, deleting or clearing the search always starts again from the top of the list.
+    LaunchedEffect(query) { listState.scrollToItem(0) }
+
+    // Keyboard: scrolling the list (or dragging the A-Z rail) closes it but keeps the search text and results.
+    val density = LocalDensity.current
+    val view = LocalView.current
+    val focusManager = LocalFocusManager.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val imeBottomState = rememberUpdatedState(imeBottom)
+    fun hideKeyboard() {
+        focusManager.clearFocus()
+        ctx.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(view.windowToken, 0)
+    }
+    val kbWatcher = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source == NestedScrollSource.Drag && available.y != 0f && imeBottomState.value > 0) hideKeyboard()
+                return Offset.Zero
+            }
+        }
+    }
+    // Height of the list area when the keyboard is closed: the A-Z rail keeps this size while the keyboard is up.
+    var areaH by remember { mutableIntStateOf(0) }
+    var stableH by remember { mutableIntStateOf(0) }
+    SideEffect { if (imeBottom == 0 && areaH > 0 && areaH != stableH) stableH = areaH }
+
     LaunchedEffect(selecting) { onBarHidden(selecting) }
     DisposableEffect(Unit) { onDispose { onBarHidden(false) } }
     BackHandler(enabled = selecting) { selecting = false; selected = emptySet() }
@@ -85,20 +134,32 @@ fun ContactsTab(
     }
 
     val total = remember(contacts) { contacts.distinctBy { it.id }.size }
+    val searching = query.isNotBlank()
     val people = remember(contacts, query) {
-        val q = digitsOf(query)
-        (if (query.isBlank()) contacts
-        else contacts.filter { it.name.contains(query, true) || (q.isNotEmpty() && digitsOf(it.number).contains(q)) })
-            .distinctBy { it.id }
+        if (query.isBlank()) contacts.distinctBy { it.id }
+        else {
+            val q = query.trim().lowercase()
+            val qd = digitsOf(query)
+            contacts.map { it to searchRank(it, q, qd) }
+                .filter { it.second >= 0 }
+                .sortedWith(compareBy({ it.second }, { it.first.name.lowercase() }))   // best match first
+                .distinctBy { it.first.id }
+                .map { it.first }
+        }
     }
-    val rows = remember(people) {
+    val rows = remember(people, searching) {
         buildList<ListRow> {
-            people.groupBy { initialOf(it.name) }
-                .toSortedMap(compareBy<Char> { if (it == '#') Char.MIN_VALUE else it })
-                .forEach { (letter, list) ->
-                    add(ListRow.Head(letter))
-                    list.forEach { add(ListRow.Item(it)) }
-                }
+            if (searching) {
+                // Search results keep their ranking (no A-Z sections).
+                people.forEach { add(ListRow.Item(it)) }
+            } else {
+                people.groupBy { initialOf(it.name) }
+                    .toSortedMap(compareBy<Char> { if (it == '#') Char.MIN_VALUE else it })
+                    .forEach { (letter, list) ->
+                        add(ListRow.Head(letter))
+                        list.forEach { add(ListRow.Item(it)) }
+                    }
+            }
         }
     }
     val showLead = query.isBlank() && !selecting
@@ -151,7 +212,7 @@ fun ContactsTab(
             SearchPill(query, { query = it }, "$total Contacts")
         }
 
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { areaH = it.height }) {
             when {
                 !canRead -> PermissionPrompt("Allow contacts access to see your contacts here.", onRequestPerms)
                 rows.isEmpty() -> Text(
@@ -159,7 +220,7 @@ fun ContactsTab(
                     Modifier.align(Alignment.Center), color = Pal.Gray
                 )
                 else -> LazyColumn(
-                    state = listState, modifier = Modifier.fillMaxSize(),
+                    state = listState, modifier = Modifier.fillMaxSize().nestedScroll(kbWatcher),
                     contentPadding = PaddingValues(top = 6.dp, bottom = 120.dp)
                 ) {
                     if (showLead) {
@@ -232,13 +293,19 @@ fun ContactsTab(
                     val at = (headIndex[target] ?: 0) + lead
                     scope.launch { listState.scrollToItem(at) }
                 }
+                // Same size and place as without the keyboard (it is covered, not squeezed, when the keyboard opens).
+                val railMod = if (stableH > 0)
+                    Modifier.align(Alignment.TopEnd).padding(end = 2.dp)
+                        .offset(y = with(density) { (stableH * 0.11f).toDp() })
+                        .width(26.dp).requiredHeight(with(density) { (stableH * 0.78f).toDp() })
+                else Modifier.align(Alignment.CenterEnd).padding(end = 2.dp).width(26.dp).fillMaxHeight(0.78f)
                 Column(
-                    Modifier.align(Alignment.CenterEnd).padding(end = 2.dp).width(26.dp).fillMaxHeight(0.78f)
+                    railMod
                         .onSizeChanged { h = it.height.coerceAtLeast(1) }
-                        .pointerInput(letters, lead) { detectTapGestures(onTap = { jump(it.y) }) }
+                        .pointerInput(letters, lead) { detectTapGestures(onTap = { hideKeyboard(); jump(it.y) }) }
                         .pointerInput(letters, lead) {
                             detectVerticalDragGestures(
-                                onDragStart = { jump(it.y) },
+                                onDragStart = { hideKeyboard(); jump(it.y) },
                                 onVerticalDrag = { change, _ -> jump(change.position.y) }
                             )
                         },
