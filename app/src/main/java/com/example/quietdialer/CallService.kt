@@ -76,7 +76,7 @@ class CallService : InCallService() {
         call.registerCallback(cb)
         CallManager.add(call, this)
         onCallsChanged()
-        // Phone in use and unlocked: an incoming call stays in the notification (heads-up with
+        // Phone in use and unlocked: an incoming call stays pinned in the notification (card with
         // Answer / Decline) and never takes over the screen. Otherwise open our call screen right
         // away; for incoming calls the full-screen notification is the backup if the system blocks it.
         val quietIncoming = call.state == Call.STATE_RINGING && deviceUnlocked()
@@ -94,6 +94,15 @@ class CallService : InCallService() {
     override fun onCallAudioStateChanged(audioState: CallAudioState) {
         CallManager.setAudio(audioState)
         onCallsChanged() // keep Mute / Speaker labels in the notification in sync
+    }
+
+    /**
+     * Called by the system when the person presses a volume key (or power) while the phone is
+     * ringing. Because this app plays the ringtone itself, it must stop it here. The call and its
+     * notification stay exactly as they are, only the sound stops.
+     */
+    override fun onSilenceRinger() {
+        stopRinging()
     }
 
     /** True while the screen is on and the phone is unlocked (i.e. the person is using it). */
@@ -171,7 +180,11 @@ class CallService : InCallService() {
             b.setCustomContentView(v)
                 .setCustomHeadsUpContentView(v)
                 .setShowWhen(false)
-            if (!unlocked) b.setFullScreenIntent(open, true)
+            // With a full-screen intent the system keeps the card pinned at the top (it does not
+            // time out like a normal notification) until the call is answered, declined, missed or
+            // swiped away. When the phone is unlocked and in use, Android shows it as this card
+            // instead of opening the full call screen.
+            b.setFullScreenIntent(open, true)
         } else {
             // Plain custom view on the system notification surface: name + timer on the left,
             // Mute / Speaker / Hang up on the right. No big view, so no expand arrow.
@@ -234,7 +247,13 @@ class CallService : InCallService() {
         if (ringtone?.isPlaying == true) return
         ringtone = RingtoneManager.getRingtone(
             this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-        )?.also { it.play() }
+        )?.also {
+            it.audioAttributes = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            it.play()
+        }
     }
 
     private fun stopRinging() {
