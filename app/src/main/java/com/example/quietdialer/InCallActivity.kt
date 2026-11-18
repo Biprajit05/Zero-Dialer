@@ -20,39 +20,64 @@ class InCallActivity : ComponentActivity() {
 
     private val micPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok) startOrAskAccessibility()
+            if (ok) startRecording(useShizuku = false)
             else Toast.makeText(this, "Microphone permission is needed to record", Toast.LENGTH_SHORT).show()
         }
 
-    private fun startRecording() {
+    private fun startRecording(useShizuku: Boolean) {
         val who = CallManager.primary()?.let { CallManager.numberOf(it) } ?: "call"
-        if (CallRecorder.start(this, who)) CallService.instance?.refreshNotification()
+        if (CallRecorder.start(this, who, useShizuku)) CallService.instance?.refreshNotification()
         else Toast.makeText(this, "Couldn't start recording", Toast.LENGTH_SHORT).show()
     }
 
     private fun toggleRecording() {
-        when {
-            CallRecorder.active.value -> { CallRecorder.stop(this); CallService.instance?.refreshNotification() }
-            CallRecorder.hasPermission(this) -> startOrAskAccessibility()
-            else -> micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        if (CallRecorder.active.value) {
+            CallRecorder.stop(this)
+            CallService.instance?.refreshNotification()
+            return
+        }
+        when (ShizukuRecorder.status(this)) {
+            ShizukuRecorder.Status.READY -> startRecording(useShizuku = true)
+            ShizukuRecorder.Status.NO_PERMISSION -> {
+                Toast.makeText(this, "Allow Quiet Dialer in the Shizuku popup", Toast.LENGTH_SHORT).show()
+                ShizukuRecorder.requestPermission { granted ->
+                    if (granted) startRecording(useShizuku = true)
+                    else Toast.makeText(this, "Shizuku permission was not given", Toast.LENGTH_SHORT).show()
+                }
+            }
+            else -> askShizukuSetup()
         }
     }
 
-    private var skipAccessibilityPrompt = false
+    private fun startMicOnly() {
+        if (CallRecorder.hasPermission(this)) startRecording(useShizuku = false)
+        else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
-    private fun startOrAskAccessibility() {
-        if (CallRecorder.a11yEnabled(this) || skipAccessibilityPrompt) { startRecording(); return }
+    private fun askShizukuSetup() {
+        val st = ShizukuRecorder.status(this)
+        val installed = st != ShizukuRecorder.Status.NOT_INSTALLED
+        val msg = when (st) {
+            ShizukuRecorder.Status.NOT_INSTALLED ->
+                "To record both sides of a call, Quiet Dialer needs Shizuku. Install the Shizuku app, start it, then come back and tap Record."
+            ShizukuRecorder.Status.OLD_VERSION ->
+                "Your Shizuku app is too old. Update it, start it, then tap Record again."
+            else ->
+                "Shizuku is installed but not running. Open it and tap Start, then tap Record again."
+        }
         android.app.AlertDialog.Builder(this)
-            .setTitle("Turn on call recording")
-            .setMessage(
-                "Android silences the microphone during calls for most apps, so recordings come out empty. " +
-                    "To fix that, open Accessibility settings, find Phone and switch it on. " +
-                    "It is only used to keep the microphone working; it does not read your screen."
-            )
-            .setPositiveButton("Open settings") { _, _ ->
-                startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            .setTitle("Call recording needs Shizuku")
+            .setMessage(msg)
+            .setPositiveButton(if (installed) "Open Shizuku" else "Get Shizuku") { _, _ ->
+                val launch = if (installed) packageManager.getLaunchIntentForPackage(ShizukuRecorder.SHIZUKU_PKG) else null
+                try {
+                    startActivity(
+                        launch ?: Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/"))
+                    )
+                } catch (_: Exception) { }
             }
-            .setNegativeButton("Record anyway") { _, _ -> skipAccessibilityPrompt = true; startRecording() }
+            .setNegativeButton("Mic only") { _, _ -> startMicOnly() }
+            .setNeutralButton("Cancel", null)
             .show()
     }
 
@@ -74,20 +99,18 @@ class InCallActivity : ComponentActivity() {
             MaterialTheme {
                 val snaps by CallManager.snaps.collectAsState()
                 val audio by CallManager.audio.collectAsState()
-                // People inside a conference are shown by the conference call itself.
-                val roots = snaps.filter { it.call.parent == null }.ifEmpty { snaps }
-                val primary = roots.firstOrNull { it.state == Call.STATE_RINGING }
-                    ?: roots.firstOrNull {
+                val primary = snaps.firstOrNull { it.state == Call.STATE_RINGING }
+                    ?: snaps.firstOrNull {
                         it.state == Call.STATE_ACTIVE || it.state == Call.STATE_DIALING ||
                             it.state == Call.STATE_CONNECTING
                     }
-                    ?: roots.firstOrNull()
+                    ?: snaps.firstOrNull()
 
                 if (primary == null) {
                     LaunchedEffect(Unit) { finish() }
                     return@MaterialTheme
                 }
-                val other = roots.firstOrNull { it.call != primary.call && it.state == Call.STATE_HOLDING }
+                val other = snaps.firstOrNull { it.call != primary.call && it.state == Call.STATE_HOLDING }
 
                 val route = audio?.route ?: CallAudioState.ROUTE_EARPIECE
                 val inCallNow = primary.state == Call.STATE_ACTIVE ||
@@ -130,9 +153,7 @@ class InCallActivity : ComponentActivity() {
                     onMessages = { sendSms(this@InCallActivity, primary.number) },
                     onEnd = { primary.call.disconnect() },
                     onDtmf = { ch, down -> if (down) primary.call.playDtmfTone(ch) else primary.call.stopDtmfTone() },
-                    onSwap = { other?.call?.unhold() },
-                    onMerge = { CallManager.merge(primary.call) },
-                    onEndCall = { it.disconnect() }
+                    onSwap = { other?.call?.unhold() }
                 )
             }
         }

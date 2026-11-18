@@ -28,14 +28,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalTextInputService
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -51,6 +44,8 @@ import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -70,11 +65,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalView
-import android.view.inputmethod.InputMethodManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -89,9 +80,6 @@ private val KEYS = listOf(
     listOf("7" to "PQRS", "8" to "TUV", "9" to "WXYZ"),
     listOf("*" to "", "0" to "+", "#" to "")
 )
-
-/** Calls from the same number share one row in Recents. */
-private fun groupKey(e: LogEntry): String = numberKey(e.number).ifEmpty { "id${e.id}" }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -113,46 +101,17 @@ fun DialTab(
     val reload = remember { mutableIntStateOf(0) }
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
-    // The dialled number with its cursor / selection. Keys insert at the cursor; the system
-    // long-press menu (Copy / Paste / Select all) works on it. `number` stays the source of truth
-    // for everything else; when it changes from outside (call placed, redial) the cursor goes to the end.
-    var field by remember { mutableStateOf(TextFieldValue(number, TextRange(number.length))) }
-    LaunchedEffect(number) {
-        if (field.text != number) field = TextFieldValue(number, TextRange(number.length))
-    }
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf(setOf<Long>()) }
     var missedOnly by rememberSaveable { mutableStateOf(false) }
     var padVisible by rememberSaveable { mutableStateOf(true) }
     var menuOpen by remember { mutableStateOf(false) }
     var themeOpen by remember { mutableStateOf(false) }
+    var recordingOpen by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
-    var fakeOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
-    val searchState = rememberLazyListState()
-    // Every change of the search text starts again from the top of the results.
-    LaunchedEffect(query) { searchState.scrollToItem(0) }
-
-    // Keyboard handling for the search: a downward swipe while it is open closes the keyboard (search text stays).
-    val view = LocalView.current
-    val focusManager = LocalFocusManager.current
-    val imeOpenState = rememberUpdatedState(WindowInsets.ime.getBottom(LocalDensity.current) > 0)
-    fun closeSearch() {
-        focusManager.clearFocus()
-        ctx.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(view.windowToken, 0)
-    }
-    val searchWatcher = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.Drag && available.y > 0f && imeOpenState.value) closeSearch()
-                return Offset.Zero
-            }
-        }
-    }
-    // Switching between All and Missed always starts from the top of the list.
-    LaunchedEffect(missedOnly) { listState.scrollToItem(0) }
     val collapsed by remember {
         derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 30 }
     }
@@ -166,16 +125,6 @@ fun DialTab(
                     padVisible = false
                     DialUiState.filterRevealed = true
                 }
-                return Offset.Zero
-            }
-        }
-    }
-
-    // Scrolling the suggestions list (while a number is typed) also closes the keypad.
-    val padCloseWatcher = remember {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.Drag && available.y != 0f) padVisible = false
                 return Offset.Zero
             }
         }
@@ -200,8 +149,6 @@ fun DialTab(
         animationSpec = tween(260, easing = FastOutSlowInEasing), label = "padSpace"
     )
     val screenW = LocalConfiguration.current.screenWidthDp.dp
-
-    SideEffect { DialUiState.padOpen = padShown }
 
     val canRead = remember(permsVersion) { hasPerm(ctx, Manifest.permission.READ_CALL_LOG) }
 
@@ -232,32 +179,10 @@ fun DialTab(
         HashMap<String, String>().also { m -> contacts.forEach { m.putIfAbsent(numberKey(it.number), it.name) } }
     }
     val all = log
-    // How many missed calls each number has (shown in brackets when more than one).
-    val missedCounts = remember(all) {
-        HashMap<String, Int>().also { m ->
-            all?.forEach { if (it.type == CallLog.Calls.MISSED_TYPE) m.merge(groupKey(it), 1, Int::plus) }
-        }
-    }
-    // One row per number: its latest call (the list is newest first).
     val shown = remember(all, query, missedOnly, nameMap) {
-        val seen = HashSet<String>()
         (all ?: emptyList()).filter { e ->
             (!missedOnly || e.type == CallLog.Calls.MISSED_TYPE) &&
                 (query.isBlank() || nameFor(e, nameMap).contains(query, true) || e.number.contains(query))
-        }.filter { seen.add(groupKey(it)) }
-    }
-
-    // Contacts that fit the search text (best match first, one row per contact).
-    val contactHits = remember(contacts, query) {
-        if (query.isBlank()) emptyList()
-        else {
-            val q = query.trim().lowercase()
-            val qd = digitsOf(query)
-            contacts.map { it to searchRank(it, q, qd) }
-                .filter { it.second >= 0 }
-                .sortedWith(compareBy({ it.second }, { it.first.name.lowercase() }))
-                .distinctBy { it.first.id }
-                .map { it.first }
         }
     }
 
@@ -267,32 +192,10 @@ fun DialTab(
     }
 
     fun key(k: String) {
-        val a = field.selection.min.coerceIn(0, field.text.length)
-        val b = field.selection.max.coerceIn(0, field.text.length)
-        if (field.text.length - (b - a) >= 32) return
+        if (number.length >= 32) return
         dtmf.play(k)
         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        val t = field.text.replaceRange(a, b, k)
-        field = TextFieldValue(t, TextRange(a + k.length))
-        onNumber(t)
-    }
-
-    fun backspace() {
-        val a = field.selection.min.coerceIn(0, field.text.length)
-        val b = field.selection.max.coerceIn(0, field.text.length)
-        val (from, to) = if (a != b) a to b else if (a > 0) (a - 1) to a else return
-        val t = field.text.removeRange(from, to)
-        field = TextFieldValue(t, TextRange(from))
-        onNumber(t)
-    }
-
-    // Typing in the field itself (paste / cut from the long-press menu): keep only dial characters.
-    fun fieldChanged(v: TextFieldValue) {
-        fun ok(c: Char) = c.isDigit() || c == '+' || c == '*' || c == '#'
-        val clean = v.text.filter(::ok).take(32)
-        fun idx(i: Int) = v.text.take(i).count(::ok).coerceAtMost(clean.length)
-        field = TextFieldValue(clean, TextRange(idx(v.selection.start), idx(v.selection.end)))
-        if (clean != number) onNumber(clean)
+        onNumber(number + k)
     }
 
     fun call() {
@@ -334,8 +237,8 @@ fun DialTab(
                             onClick = { menuOpen = false; onOpenCallBg() }
                         )
                         DropdownMenuItem(
-                            text = { Text("Fake call", color = Pal.Ink) },
-                            onClick = { menuOpen = false; fakeOpen = true }
+                            text = { Text("Call recording", color = Pal.Ink) },
+                            onClick = { menuOpen = false; recordingOpen = true }
                         )
                         DropdownMenuItem(
                             text = { Text("Theme", color = Pal.Ink) },
@@ -365,72 +268,12 @@ fun DialTab(
             when {
                 number.isNotEmpty() && !selecting -> Box(Modifier.fillMaxSize().padding(bottom = padSpace)) {
                     Suggestions(
-                        number = number, contacts = contacts, log = all ?: emptyList(), showNumber = !padVisible,
-                        onOpenPad = { padVisible = true }, closePad = padCloseWatcher,
+                        number = number, contacts = contacts, showNumber = !padVisible,
                         onNewContact = onNewContact
                     ) { placeCall(ctx, it); onNumber("") }
                 }
                 !canRead -> PermissionPrompt("Allow call log access to see your recent calls.", onRequestPerms)
                 all == null -> Text("Loading…", Modifier.align(Alignment.Center), color = Pal.Gray)
-                searching && query.isNotBlank() && !selecting -> LazyColumn(
-                    state = searchState, modifier = Modifier.fillMaxSize().nestedScroll(searchWatcher),
-                    contentPadding = PaddingValues(bottom = maxOf(120.dp, padSpace))
-                ) {
-                    if (shown.isNotEmpty()) {
-                        item(key = "hCalls") { SearchLabel("Recent calls") }
-                        items(shown, key = { "r${it.id}" }) { e ->
-                            val nm = nameFor(e, nameMap)
-                            RecentRow(
-                                e = e,
-                                missedCount = missedCounts[groupKey(e)] ?: 0,
-                                title = nm.ifBlank { if (isDialable(e.number)) prettyNumber(e.number) else "Unknown" },
-                                showNumber = nm.isNotBlank(),
-                                selecting = false,
-                                checked = false,
-                                onClick = { placeCall(ctx, e.number) },
-                                onLong = { selecting = true; searching = false; query = ""; selected = setOf(e.id) },
-                                onInfo = { onOpenInfo(e.number) },
-                                showCall = true,
-                                onCall = { placeCall(ctx, e.number) }
-                            )
-                        }
-                    }
-                    if (contactHits.isNotEmpty()) {
-                        item(key = "hContacts") {
-                            SearchLabel(if (contactHits.size == 1) "1 contact found" else "${contactHits.size} contacts found")
-                        }
-                        items(contactHits, key = { "c${it.id}" }) { c ->
-                            Column {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                                        .bounceClick(shape = RoundedCornerShape(16.dp), pressedScale = 0.98f) { onOpenInfo(c.number) }
-                                        .padding(start = 10.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Avatar(c.name, 44.dp, c.id)
-                                    Spacer(Modifier.width(16.dp))
-                                    Column(Modifier.weight(1f)) {
-                                        Text(
-                                            c.name, fontSize = 18.sp, fontWeight = FontWeight.Medium, color = Pal.Ink,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(prettyNumber(c.number), fontSize = 14.sp, color = Pal.Gray, maxLines = 1)
-                                    }
-                                    Spacer(Modifier.width(8.dp))
-                                    RoundIconButton(Icons.Default.Call, "Call") { placeCall(ctx, c.number) }
-                                }
-                                HorizontalDivider(Modifier.padding(start = 78.dp, end = 14.dp), color = Pal.Divider, thickness = 0.5.dp)
-                            }
-                        }
-                    }
-                    if (shown.isEmpty() && contactHits.isEmpty()) {
-                        item(key = "none") {
-                            Box(Modifier.fillMaxWidth().padding(top = 80.dp), contentAlignment = Alignment.TopCenter) {
-                                Text("No matches", color = Pal.Gray)
-                            }
-                        }
-                    }
-                }
                 shown.isEmpty() -> Text(
                     if (missedOnly) "No missed calls" else "No recent calls",
                     Modifier.align(Alignment.Center), color = Pal.Gray
@@ -444,7 +287,6 @@ fun DialTab(
                         RecentRow(
                             modifier = Modifier.animateItemPlacement(),
                             e = e,
-                            missedCount = missedCounts[groupKey(e)] ?: 0,
                             title = nm.ifBlank { if (isDialable(e.number)) prettyNumber(e.number) else "Unknown" },
                             showNumber = nm.isNotBlank(),
                             selecting = selecting,
@@ -473,12 +315,16 @@ fun DialTab(
                     modifier = Modifier.onSizeChanged { padPx = it.height },
                     number = number,
                     morph = { morph },
-                    field = field,
-                    onField = { fieldChanged(it) },
+                    onPaste = { text ->
+                        val clean = text.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+                        if (clean.isEmpty()) Toast.makeText(ctx, "No number to paste", Toast.LENGTH_SHORT).show()
+                        else onNumber((number + clean).take(32))
+                    },
+                    onCopy = { copyNumber(ctx, number) },
                     onKey = { key(it) },
                     onHide = { padVisible = false },
                     onCall = { call() },
-                    onBackspace = { backspace() },
+                    onBackspace = { if (number.isNotEmpty()) onNumber(number.dropLast(1)) },
                     onClear = { onNumber("") }
                 )
             }
@@ -495,7 +341,7 @@ fun DialTab(
                             val sc = 1f - 0.5f * morph
                             scaleX = sc; scaleY = sc
                             translationX = -(screenW.toPx() * 0.28f) * morph
-                            translationY = -(84.dp.toPx()) * morph
+                            translationY = -(90.dp.toPx()) * morph
                         },
                     icon = { DotsGlyph(Color.White) }
                 )
@@ -506,7 +352,7 @@ fun DialTab(
         if (selecting) DeleteBar(enabled = selected.isNotEmpty()) { confirmDelete = true }
     }
 
-    if (fakeOpen) FakeCallDialog { fakeOpen = false }
+    if (recordingOpen) RecordingDialog(onDismiss = { recordingOpen = false })
 
     if (themeOpen) {
         ThemeDialog(
@@ -521,12 +367,7 @@ fun DialTab(
             text = "Are you sure you want to delete ${selected.size} call log?",
             confirmLabel = "Delete",
             onConfirm = {
-                // A row stands for all calls of that number (only the missed ones on the Missed tab).
-                val keys = shown.filter { it.id in selected }.map { groupKey(it) }.toSet()
-                val ids = (all ?: emptyList()).filter {
-                    groupKey(it) in keys && (!missedOnly || it.type == CallLog.Calls.MISSED_TYPE)
-                }.map { it.id }.toSet()
-                deleteLogEntries(ctx, ids)
+                deleteLogEntries(ctx, selected)
                 selecting = false; selected = emptySet(); confirmDelete = false; reload.intValue++
             },
             onDismiss = { confirmDelete = false }
@@ -545,29 +386,27 @@ fun DialTab(
 
 @Composable
 private fun FilterPill(missedOnly: Boolean, onChange: (Boolean) -> Unit) {
-    val segW = 68.dp
-    val segH = 30.dp
-    Box(Modifier.fillMaxWidth().padding(top = 0.dp, bottom = 8.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.shadow(3.dp, CircleShape).background(Pal.Raised).padding(3.dp)) {
-            // The highlight slides between All and Missed and changes colour: green for All, red for Missed.
+    val segW = 84.dp
+    val segH = 36.dp
+    Box(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.shadow(4.dp, CircleShape).background(Pal.Raised).padding(4.dp)) {
+            // The green highlight slides between All and Missed.
             val x by animateDpAsState(
                 targetValue = if (missedOnly) segW else 0.dp,
                 animationSpec = spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow),
                 label = "filterHighlight"
             )
-            val hl by animateColorAsState(if (missedOnly) Pal.MissedPill else Pal.GreenDark, tween(220), label = "filterHighlightColor")
-            Box(Modifier.offset(x = x).size(width = segW, height = segH).clip(CircleShape).background(hl))
+            Box(Modifier.offset(x = x).size(width = segW, height = segH).clip(CircleShape).background(Pal.GreenDark))
             Row {
                 listOf(false to "All", true to "Missed").forEach { (m, label) ->
                     val on = missedOnly == m
-                    val target = if (!on) Pal.Gray else if (m) Pal.MissedPillText else Pal.Green
-                    val c by animateColorAsState(target, tween(220), label = "filterText")
+                    val c by animateColorAsState(if (on) Pal.Green else Pal.Gray, tween(200), label = "filterText")
                     Box(
                         Modifier.size(width = segW, height = segH)
-                            .bounceClick(shape = CircleShape, pressedScale = 0.92f, ripple = false) { onChange(m) },
+                            .bounceClick(shape = CircleShape, pressedScale = 0.92f) { onChange(m) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(label, color = c, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text(label, color = c, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -581,8 +420,8 @@ private fun Keypad(
     modifier: Modifier = Modifier,
     number: String,
     morph: () -> Float,
-    field: TextFieldValue,
-    onField: (TextFieldValue) -> Unit,
+    onPaste: (String) -> Unit,
+    onCopy: () -> Unit,
     onKey: (String) -> Unit,
     onHide: () -> Unit,
     onCall: () -> Unit,
@@ -592,34 +431,23 @@ private fun Keypad(
     val keyShape = RoundedCornerShape(50)
     Column(
         modifier.fillMaxWidth()
-            // swipe the sheet down to close it
-            .pointerInput(Unit) {
-                var total = 0f
-                detectVerticalDragGestures(
-                    onDragStart = { total = 0f },
-                    onDragEnd = { total = 0f },
-                    onDragCancel = { total = 0f },
-                    onVerticalDrag = { change, dy ->
-                        total += dy
-                        if (total > 70f) { total = Float.NEGATIVE_INFINITY; change.consume(); onHide() }
-                    }
-                )
-            }
             .background(Pal.PadBg, RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp))
             // the nav pill floats over this bottom part
             .padding(bottom = 109.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(12.dp))
         Box(Modifier.size(width = 34.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(Pal.Handle))
-        Spacer(Modifier.height(6.dp))
-        NumberBar(field, onField)
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Spacer(Modifier.height(10.dp))
+        AnimatedVisibility(visible = number.isNotEmpty(), enter = expandVertically(tween(160)) + fadeIn(tween(160)), exit = shrinkVertically(tween(140)) + fadeOut(tween(100))) {
+            NumberBar(number, onPaste, onCopy)
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             KEYS.forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     row.forEach { (d, letters) ->
                         Box(
-                            Modifier.weight(1f).height(46.dp)
+                            Modifier.weight(1f).height(58.dp)
                                 .bounceClick(
                                     shape = keyShape, pressedScale = 0.93f,
                                     onLongClick = if (d == "0") ({ onKey("+") }) else null,
@@ -630,30 +458,30 @@ private fun Keypad(
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                                 Text(
-                                    d, fontSize = if (d == "*" || d == "#") 26.sp else 23.sp,
-                                    color = Pal.Ink, lineHeight = 24.sp
+                                    d, fontSize = if (d == "*" || d == "#") 30.sp else 27.sp,
+                                    color = Pal.Ink, lineHeight = 30.sp
                                 )
                                 if (d == "1") VoicemailGlyph()
                                 else if (letters.isNotEmpty()) Text(
-                                    letters, fontSize = 8.sp, color = Pal.KeyLetters,
-                                    fontWeight = FontWeight.Medium, lineHeight = 8.sp
+                                    letters, fontSize = 9.sp, color = Pal.KeyLetters,
+                                    fontWeight = FontWeight.Medium, lineHeight = 10.sp
                                 )
                             }
                         }
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 // hide keypad
                 Box(
-                    Modifier.weight(1f).height(46.dp)
+                    Modifier.weight(1f).height(58.dp)
                         .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onHide)
                         .background(Pal.Key),
                     contentAlignment = Alignment.Center
                 ) { DotsGlyph(Pal.Ink) }
                 // call: grows out of the green button when the sheet opens
                 Box(
-                    Modifier.weight(1f).height(46.dp).graphicsLayer {
+                    Modifier.weight(1f).height(58.dp).graphicsLayer {
                         val m = morph()
                         scaleX = 0.35f + 0.65f * m
                         scaleY = 0.6f + 0.4f * m
@@ -665,11 +493,11 @@ private fun Keypad(
                             .bounceClick(shape = keyShape, pressedScale = 0.93f, onClick = onCall)
                             .background(Pal.CallGreen),
                         contentAlignment = Alignment.Center
-                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(26.dp)) }
+                    ) { Icon(Icons.Default.Call, "Call", tint = Color.White, modifier = Modifier.size(30.dp)) }
                 }
                 // backspace (long press clears)
                 Box(
-                    Modifier.weight(1f).height(46.dp)
+                    Modifier.weight(1f).height(58.dp)
                         .bounceClick(shape = keyShape, pressedScale = 0.93f, onLongClick = onClear, onClick = onBackspace)
                         .background(Pal.Key),
                     contentAlignment = Alignment.Center
@@ -677,7 +505,7 @@ private fun Keypad(
                     Icon(
                         Icons.AutoMirrored.Filled.Backspace, "Delete digit",
                         tint = Pal.KeyLetters.copy(alpha = if (number.isNotEmpty()) 1f else 0.7f),
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }
@@ -689,16 +517,13 @@ private fun Keypad(
 private fun RecentRow(
     modifier: Modifier = Modifier,
     e: LogEntry,
-    missedCount: Int = 0,
     title: String,
     showNumber: Boolean,
     selecting: Boolean,
     checked: Boolean,
     onClick: () -> Unit,
     onLong: () -> Unit,
-    onInfo: () -> Unit,
-    showCall: Boolean = false,
-    onCall: () -> Unit = {}
+    onInfo: () -> Unit
 ) {
     val missed = e.type == CallLog.Calls.MISSED_TYPE
     val (icon, tint) = when (e.type) {
@@ -713,6 +538,7 @@ private fun RecentRow(
         Row(
             Modifier.fillMaxWidth()
                 .bounceClick(shape = shape, pressedScale = 0.98f, onLongClick = onLong, onClick = onClick)
+                .background(if (missed) Pal.MissedBg else Color.Transparent)
                 .padding(start = 8.dp, end = 6.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -721,7 +547,7 @@ private fun RecentRow(
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    if (missed && missedCount > 1) "$title ($missedCount)" else title, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    title, fontSize = 18.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     color = if (missed) Pal.Missed else Pal.Ink
                 )
                 Spacer(Modifier.height(4.dp))
@@ -744,100 +570,91 @@ private fun RecentRow(
                     .background(Pal.Chip),
                 contentAlignment = Alignment.Center
             ) { Icon(Icons.Default.KeyboardArrowRight, "Details", tint = Pal.Ink, modifier = Modifier.size(22.dp)) }
-            if (showCall) {
-                Spacer(Modifier.width(8.dp))
-                RoundIconButton(Icons.Default.Call, "Call", size = 34.dp, onClick = onCall)
-            }
         }
         HorizontalDivider(Modifier.padding(start = 42.dp), color = Pal.Divider, thickness = 0.5.dp)
     }
 }
 
-/**
- * The typed number, shown right above the keys. Tap to place the cursor, long-press for Android's own
- * Copy / Paste / Select all menu. The system keyboard is switched off here - the keypad is the input.
- */
+/** The typed number, shown right above the keys, with paste (left) and copy (right). */
 @Composable
-private fun NumberBar(field: TextFieldValue, onField: (TextFieldValue) -> Unit) {
-    val n = field.text.length
-    CompositionLocalProvider(LocalTextInputService provides null) {
-        Box(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
-            BasicTextField(
-                value = field,
-                onValueChange = onField,
-                singleLine = true,
-                textStyle = TextStyle(
-                    textAlign = TextAlign.Center, color = Pal.Ink,
-                    fontSize = when { n > 18 -> 22.sp; n > 12 -> 28.sp; else -> 30.sp }
-                ),
-                cursorBrush = SolidColor(Pal.Green),
-                modifier = Modifier.fillMaxWidth()
-            )
+private fun NumberBar(number: String, onPaste: (String) -> Unit, onCopy: () -> Unit) {
+    val ctx = LocalContext.current
+    val cm = remember { ctx.getSystemService(android.content.ClipboardManager::class.java) }
+    // Re-check the clipboard whenever the typed number changes.
+    val canPaste = remember(number) { cm.hasPrimaryClip() }
+    Row(
+        Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (canPaste) HeaderIcon(plain = true, onClick = {
+                val t = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty()
+                onPaste(t)
+            }) { Icon(Icons.Default.ContentPaste, "Paste number", tint = Pal.Gray, modifier = Modifier.size(22.dp)) }
+        }
+        Text(
+            number,
+            modifier = Modifier.weight(1f),
+            textAlign = TextAlign.Center,
+            fontSize = when { number.length > 18 -> 22.sp; number.length > 12 -> 28.sp; else -> 34.sp },
+            color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+        Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            if (number.isNotEmpty()) HeaderIcon(plain = true, onClick = onCopy) {
+                Icon(Icons.Default.ContentCopy, "Copy number", tint = Pal.Gray, modifier = Modifier.size(22.dp))
+            }
         }
     }
 }
 
 /**
- * Shown instead of recents while a number is being typed: contacts and recent numbers that look like it
- * (most similar first), then - only when the number isn't a saved contact - New contact / Add to existing
- * contact / Send message / Video call.
+ * Shown instead of recents while a number is being typed. For a number that isn't saved yet it
+ * lists New contact / Add to existing contact / Send message / Video call, then matching contacts.
  */
 @Composable
 private fun Suggestions(
     number: String,
     contacts: List<Contact>,
-    log: List<LogEntry>,
     showNumber: Boolean,
-    onOpenPad: () -> Unit,
-    closePad: NestedScrollConnection,
     onNewContact: (String) -> Unit,
     onCall: (String) -> Unit
 ) {
     val ctx = LocalContext.current
-    val matches = remember(number, contacts, log) { dialSuggestions(number, contacts, log) }
+    val matches = remember(number, contacts) { contacts.filter { matchesDial(it, number) }.take(40) }
     val key = numberKey(number)
     val saved = remember(number, contacts) { key.isNotEmpty() && contacts.any { numberKey(it.number) == key } }
     Column(Modifier.fillMaxSize()) {
         if (showNumber) {
-            // Keypad is hidden: the typed number sits in the middle; tap it to bring the keypad back.
+            // Keypad is hidden, so show the number here instead.
             Text(
-                number, fontSize = if (number.length > 14) 26.sp else 34.sp, color = Pal.Ink,
-                textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-                    .bounceClick(shape = RoundedCornerShape(12.dp), pressedScale = 0.98f, ripple = false, onClick = onOpenPad)
-                    .padding(horizontal = 20.dp, vertical = 10.dp)
+                number, fontSize = if (number.length > 14) 24.sp else 32.sp, color = Pal.Ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
             )
             HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
         }
-        LazyColumn(Modifier.fillMaxSize().nestedScroll(closePad)) {
-            items(matches, key = { "${it.contact?.id ?: 0}:${numberKey(it.number)}" }) { m ->
-                val c = m.contact
-                Row(
-                    Modifier.fillMaxWidth().clickable { onCall(m.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (c != null) Avatar(c.name, 44.dp, c.id) else Avatar("", 44.dp, 0L, person = true)
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            c?.name ?: prettyNumber(m.number), fontSize = 17.sp, color = Pal.Ink,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            if (c != null) prettyNumber(m.number) else "Recent call",
-                            fontSize = 13.sp, color = Pal.Gray
-                        )
-                    }
-                }
-            }
-            if (!saved && isDialable(number)) {
+        LazyColumn(Modifier.fillMaxSize()) {
+            if (!saved) {
                 item {
                     Column {
-                        if (matches.isNotEmpty()) HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
                         OptionRow("New contact") { onNewContact(number) }
                         OptionRow("Add to existing contact") { addToExistingIntent(ctx, number) }
                         OptionRow("Send message") { sendSms(ctx, number) }
                         OptionRow("Video call") { placeVideoCall(ctx, number) }
+                        if (matches.isNotEmpty()) HorizontalDivider(color = Pal.Divider, thickness = 0.5.dp)
+                    }
+                }
+            }
+            items(matches, key = { "${it.id}:${numberKey(it.number)}" }) { c ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { onCall(c.number) }.padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Avatar(c.name, 44.dp, c.id)
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(c.name, fontSize = 17.sp, color = Pal.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(prettyNumber(c.number), fontSize = 13.sp, color = Pal.Gray)
                     }
                 }
             }
@@ -850,14 +667,5 @@ private fun OptionRow(label: String, onClick: () -> Unit) {
     Text(
         label, color = Pal.Link, fontSize = 18.sp,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 15.dp)
-    )
-}
-
-/** Small grey heading above a group of search results ("Recent calls", "3 contacts found"). */
-@Composable
-private fun SearchLabel(text: String) {
-    Text(
-        text, color = Pal.Gray, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-        modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 14.dp, bottom = 6.dp)
     )
 }

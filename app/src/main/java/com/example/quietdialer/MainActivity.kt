@@ -12,8 +12,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -63,6 +61,8 @@ class MainActivity : ComponentActivity() {
         )
         val initial = intent?.data?.schemeSpecificPart ?: ""
         ThemeSettings.load(this)
+        RecordSettings.load(this)
+        ShizukuRecorder.init(this)
         if (savedInstanceState == null) DialUiState.filterRevealed = false // fresh open: hide the filter again
         setContent {
             val dark = when (ThemeSettings.mode) {
@@ -123,10 +123,7 @@ class MainActivity : ComponentActivity() {
 
 /** Full-screen pages that slide over the tabs. */
 sealed interface Overlay {
-    data class Detail(val id: Long, val back: Overlay? = null) : Overlay
-    object Groups : Overlay
-    data class GroupDetail(val id: Long) : Overlay
-    data class GroupEdit(val id: Long) : Overlay   // id 0 = new group
+    data class Detail(val id: Long) : Overlay
     data class NewContact(val number: String = "") : Overlay
     data class Number(val number: String) : Overlay
     object PickFavorite : Overlay
@@ -142,8 +139,6 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
     var contactsVersion by remember { mutableIntStateOf(0) }
     var overlay by remember { mutableStateOf<Overlay?>(null) }
     var barHidden by remember { mutableStateOf(false) }
-    var groups by remember { mutableStateOf(GroupStore.load(ctx)) }
-    fun saveGroups(list: List<ContactGroup>) { groups = list; GroupStore.save(ctx, list) }
 
     LaunchedEffect(permsVersion, contactsVersion) {
         contacts = if (hasPerm(ctx, Manifest.permission.READ_CONTACTS))
@@ -155,14 +150,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
         !rm.isRoleAvailable(RoleManager.ROLE_DIALER) || rm.isRoleHeld(RoleManager.ROLE_DIALER)
     }
 
-    BackHandler(enabled = overlay != null) {
-        overlay = when (val o = overlay) {
-            is Overlay.Detail -> o.back
-            is Overlay.GroupDetail -> Overlay.Groups
-            is Overlay.GroupEdit -> if (o.id != 0L) Overlay.GroupDetail(o.id) else Overlay.Groups
-            else -> null
-        }
-    }
+    BackHandler(enabled = overlay != null) { overlay = null }
 
     Box(Modifier.fillMaxSize().background(Pal.Bg)) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -172,7 +160,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        "Phone isn't your default phone app, so calls open the phone's own screen.",
+                        "Quiet Dialer isn't your default phone app, so calls open the phone's own screen.",
                         fontSize = 13.sp, color = Pal.Ink, modifier = Modifier.weight(1f)
                     )
                     TextButton(onClick = onRequestRole) { Text("Set default", color = Pal.Green) }
@@ -206,7 +194,6 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                             contacts, permsVersion, onRequestPerms,
                             onOpenContact = { overlay = Overlay.Detail(it.id) },
                             onNewContact = { overlay = Overlay.NewContact() },
-                            onOpenGroups = { overlay = Overlay.Groups },
                             onBarHidden = { barHidden = it },
                             onChanged = { contactsVersion++ }
                         )
@@ -224,15 +211,9 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                     enter = slideInVertically(tween(280)) { it } + fadeIn(tween(220)),
                     exit = slideOutVertically(tween(200)) { it } + fadeOut(tween(150))
                 ) {
-                    // On the Dial tab with the keypad open the bar glides to the centre of the screen
-                    // (the green dots button has turned into the call button); otherwise it sits left.
-                    val centred = tab == 0 && DialUiState.padOpen
-                    val navSpec = tween<androidx.compose.ui.unit.Dp>(if (centred) 300 else 240, easing = FastOutSlowInEasing)
-                    val navStart by animateDpAsState(if (centred) 64.dp else 16.dp, navSpec, label = "navStart")
-                    val navEnd by animateDpAsState(if (centred) 64.dp else 90.dp, navSpec, label = "navEnd")
                     FloatingNav(
                         tab = tab, onTab = { tab = it },
-                        modifier = Modifier.fillMaxWidth().padding(start = navStart, end = navEnd, bottom = 14.dp)
+                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 90.dp, bottom = 14.dp)
                     )
                 }
             }
@@ -255,33 +236,7 @@ fun App(initialNumber: String, permsVersion: Int, onRequestPerms: () -> Unit, on
                 Box(Modifier.fillMaxSize().background(Pal.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
                     when (o) {
                         is Overlay.Detail -> ContactDetailScreen(
-                            o.id, contacts, onBack = { overlay = o.back }, onChanged = { contactsVersion++ }
-                        )
-                        Overlay.Groups -> GroupsScreen(
-                            groups, onBack = { overlay = null },
-                            onOpen = { overlay = Overlay.GroupDetail(it) },
-                            onNew = { overlay = Overlay.GroupEdit(0L) }
-                        )
-                        is Overlay.GroupDetail -> GroupDetailScreen(
-                            groups.firstOrNull { it.id == o.id }, contacts,
-                            onBack = { overlay = Overlay.Groups },
-                            onEdit = { overlay = Overlay.GroupEdit(o.id) },
-                            onDelete = { saveGroups(groups.filter { it.id != o.id }); overlay = Overlay.Groups },
-                            onOpenContact = { overlay = Overlay.Detail(it, back = o) }
-                        )
-                        is Overlay.GroupEdit -> GroupEditScreen(
-                            groups.firstOrNull { it.id == o.id }, contacts,
-                            onClose = { overlay = if (o.id != 0L) Overlay.GroupDetail(o.id) else Overlay.Groups },
-                            onSave = { name, members ->
-                                if (o.id == 0L) {
-                                    val g = ContactGroup(System.currentTimeMillis(), name, members)
-                                    saveGroups(groups + g)
-                                    overlay = Overlay.GroupDetail(g.id)
-                                } else {
-                                    saveGroups(groups.map { if (it.id == o.id) it.copy(name = name, members = members) else it })
-                                    overlay = Overlay.GroupDetail(o.id)
-                                }
-                            }
+                            o.id, contacts, onBack = { overlay = null }, onChanged = { contactsVersion++ }
                         )
                         is Overlay.Number -> NumberDetailScreen(o.number, onBack = { overlay = null })
                         is Overlay.NewContact -> NewContactScreen(
